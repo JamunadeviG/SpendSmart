@@ -5,8 +5,8 @@ const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
 
-// Load environment variables
-require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+// Load environment variables from backend/.env
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const { connectToDatabase } = require('./config/db');
 const models = require('./models');
@@ -27,6 +27,15 @@ app.get('/health', (req, res) => {
 app.get('/models', (req, res) => {
   res.json({ models: Object.keys(models) });
 });
+
+// Routes
+app.use('/auth', require('./routes/auth'));
+app.use('/transactions', require('./routes/transactions'));
+app.use('/budgets', require('./routes/budgets'));
+app.use('/goals', require('./routes/goals'));
+app.use('/dashboard', require('./routes/dashboard'));
+app.use('/receipts', require('./routes/receipts'));
+app.use('/chat', require('./routes/chat'));
 
 // Start server after DB connection
 const port = process.env.PORT || 4000;

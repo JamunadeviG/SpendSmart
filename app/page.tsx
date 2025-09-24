@@ -50,11 +50,20 @@ declare var SpeechRecognition: {
 }
 
 import { useState, useEffect, useRef } from "react"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -107,6 +116,7 @@ import {
   BarChart,
   Bar,
   PieChart as RechartsPieChart,
+  Pie,
   Cell,
   Legend,
 } from "recharts"
@@ -164,19 +174,145 @@ export default function HomePage() {
   const [name, setName] = useState("")
   const [monthlyIncome, setMonthlyIncome] = useState("")
   const [currentLoan, setCurrentLoan] = useState("")
+  const [token, setToken] = useState<string | null>(null)
+  const [members, setMembers] = useState<Array<{ id: string; name: string }>>([])
 
-  const handleLogin = (e: React.FormEvent) => {
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000"
+  const { toast } = useToast()
+
+  // Load authentication state from localStorage on component mount
+  useEffect(() => {
+    const initializeAuth = async () => {
+      const savedToken = localStorage.getItem('authToken')
+      const savedMembers = localStorage.getItem('authMembers')
+      
+      if (savedToken) {
+        // Verify token is still valid
+        try {
+          const res = await fetch(`${API_BASE}/auth/me`, {
+            headers: { Authorization: `Bearer ${savedToken}` },
+          })
+          
+          if (res.ok) {
+            setToken(savedToken)
+            setIsAuthenticated(true)
+            setShowLanding(false)
+            
+            if (savedMembers) {
+              try {
+                const parsedMembers = JSON.parse(savedMembers)
+                setMembers(parsedMembers)
+              } catch (error) {
+                console.error('Error parsing saved members:', error)
+              }
+            }
+          } else {
+            // Token is invalid, clear localStorage
+            localStorage.removeItem('authToken')
+            localStorage.removeItem('authMembers')
+          }
+        } catch (error) {
+          // Network error or invalid token, clear localStorage
+          localStorage.removeItem('authToken')
+          localStorage.removeItem('authMembers')
+        }
+      }
+    }
+    
+    initializeAuth()
+  }, [API_BASE])
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Mock authentication - in real app, this would validate credentials
-    if (email && password) {
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      })
+      if (!res.ok) throw new Error("Login failed")
+      const data = await res.json()
+      const jwt = data.token as string
+      setToken(jwt)
+      const apiMembers: Array<{ key: "member1" | "member2"; name: string }> = data.account?.members || []
+      const mapped = apiMembers
+        .filter((m) => m && m.key && m.name && m.name.trim())
+        .map((m) => ({ id: m.key, name: m.name }))
+      setMembers(mapped)
       setIsAuthenticated(true)
+      
+      // Save to localStorage
+      localStorage.setItem('authToken', jwt)
+      localStorage.setItem('authMembers', JSON.stringify(mapped))
+      
+      toast({ title: "Logged in", description: "Welcome back!" })
+    } catch (err) {
+      toast({ title: "Login failed", description: "Please check your credentials.", variant: "destructive" as any })
     }
   }
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (email && password && name && monthlyIncome) {
+    if (!email || !password || !name || !monthlyIncome) {
+      toast({ title: "Missing info", description: "Please complete all required fields.", variant: "destructive" as any })
+      return
+    }
+    if (password.length < 6) {
+      toast({ title: "Weak password", description: "Password must be at least 6 characters.", variant: "destructive" as any })
+      return
+    }
+    try {
+      const res = await fetch(`${API_BASE}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: name,
+          email,
+          password,
+          member1Name: name
+        }),
+      })
+      if (!res.ok) throw new Error("Register failed")
+      const data = await res.json()
+      const jwt = data.token as string
+      setToken(jwt)
+      const apiMembers: Array<{ key: "member1" | "member2"; name: string }> = data.account?.members || []
+      const mapped = apiMembers
+        .filter((m) => m && m.key && m.name && m.name.trim())
+        .map((m) => ({ id: m.key, name: m.name }))
+      setMembers(mapped)
+      
+      // Save to localStorage
+      localStorage.setItem('authToken', jwt)
+      localStorage.setItem('authMembers', JSON.stringify(mapped))
+
+      // Create initial income transaction for member1
+      if (jwt && monthlyIncome) {
+        try {
+          await fetch(`${API_BASE}/transactions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${jwt}`,
+            },
+            body: JSON.stringify({
+              memberKey: "member1",
+              amount: Number(monthlyIncome),
+              type: "income",
+              category: "Income",
+              date: new Date().toISOString().slice(0, 10),
+              notes: "Initial monthly income",
+            }),
+          })
+        } catch {
+          // ignore initial income failure
+        }
+      }
+
       setIsAuthenticated(true)
+      toast({ title: "Account created", description: "We set an initial income entry for you." })
+    } catch (err) {
+      toast({ title: "Signup failed", description: "Please try again.", variant: "destructive" as any })
     }
   }
 
@@ -185,7 +321,27 @@ export default function HomePage() {
   }
 
   if (isAuthenticated) {
-    return <FinanceDashboard userIncome={Number(monthlyIncome) || 0} userLoan={Number(currentLoan) || 0} />
+    return (
+      <FinanceDashboard
+        userIncome={Number(monthlyIncome) || 0}
+        userLoan={Number(currentLoan) || 0}
+        members={members}
+        token={token}
+        apiBase={API_BASE}
+        toast={toast}
+        onLogout={() => {
+          setIsAuthenticated(false)
+          setToken(null)
+          setMembers([])
+          // Clear localStorage on logout
+          localStorage.removeItem('authToken')
+          localStorage.removeItem('authMembers')
+          localStorage.removeItem('activeTab')
+          localStorage.removeItem('currentMember')
+          localStorage.removeItem('viewMode')
+        }}
+      />
+    )
   }
 
   return (
@@ -249,11 +405,11 @@ export default function HomePage() {
               <CardContent>
                 <form onSubmit={handleSignup} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="name">Full Name</Label>
+                    <Label htmlFor="name">Primary Member Name</Label>
                     <Input
                       id="name"
                       type="text"
-                      placeholder="Enter your full name"
+                      placeholder="Enter primary member name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       required
@@ -402,15 +558,79 @@ function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
   )
 }
 
-function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLoan: number }) {
-  const [activeTab, setActiveTab] = useState("dashboard")
+function FinanceDashboard({
+  userIncome,
+  userLoan,
+  members,
+  token,
+  apiBase,
+  onLogout,
+  toast,
+}: {
+  userIncome: number
+  userLoan: number
+  members: Array<{ id: string; name: string }>
+  token: string | null
+  apiBase: string
+  onLogout: () => void
+  toast: any
+}) {
+  const [activeTab, setActiveTab] = useState<
+    | "dashboard"
+    | "transactions"
+    | "budgets"
+    | "goals"
+    | "insights"
+    | "profile"
+    | "account"
+  >("dashboard")
+
+  // Persist activeTab to localStorage
+  useEffect(() => {
+    const savedTab = localStorage.getItem('activeTab')
+    if (savedTab && ['dashboard', 'transactions', 'budgets', 'goals', 'insights', 'profile', 'account'].includes(savedTab)) {
+      setActiveTab(savedTab as any)
+    }
+  }, [])
+
+  // Save activeTab to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('activeTab', activeTab)
+  }, [activeTab])
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([
-    { id: "1", name: "You", email: "you@example.com", role: "primary" },
-  ])
-  const [currentMember, setCurrentMember] = useState<string>("1")
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(
+    members && members.length
+      ? members.map((m, idx) => ({ id: m.id, name: m.name, email: "", role: idx === 0 ? "primary" : "secondary" }))
+      : []
+  )
+  const [currentMember, setCurrentMember] = useState<string>(members?.[0]?.id || "")
   const [viewMode, setViewMode] = useState<"individual" | "family">("individual")
+
+  // Persist currentMember and viewMode to localStorage
+  useEffect(() => {
+    const savedMember = localStorage.getItem('currentMember')
+    const savedViewMode = localStorage.getItem('viewMode')
+    
+    if (savedMember && familyMembers.some(m => m.id === savedMember)) {
+      setCurrentMember(savedMember)
+    }
+    
+    if (savedViewMode && ['individual', 'family'].includes(savedViewMode)) {
+      setViewMode(savedViewMode as 'individual' | 'family')
+    }
+  }, [familyMembers])
+
+  // Save currentMember and viewMode to localStorage whenever they change
+  useEffect(() => {
+    if (currentMember) {
+      localStorage.setItem('currentMember', currentMember)
+    }
+  }, [currentMember])
+
+  useEffect(() => {
+    localStorage.setItem('viewMode', viewMode)
+  }, [viewMode])
   const [isAddMemberDialogOpen, setIsAddMemberDialogOpen] = useState(false)
   const [memberName, setMemberName] = useState("")
   const [memberEmail, setMemberEmail] = useState("")
@@ -455,6 +675,110 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     fetchQuote()
   }, [])
 
+  // Load user profile (user + account members)
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!token) return
+      try {
+        const res = await fetch(`${apiBase}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        setProfile(data)
+        const members = data?.account?.members || []
+        const m1 = members.find((m: any) => m.key === 'member1')
+        const m2 = members.find((m: any) => m.key === 'member2')
+        setMember1Edit(m1?.name || "")
+        setMember2Edit(m2?.name || "")
+      } catch {
+        // ignore
+      }
+    }
+    loadProfile()
+  }, [token, apiBase])
+
+  // Fetch transactions from backend when authenticated
+  useEffect(() => {
+    const load = async () => {
+      if (!token) return
+      try {
+        const res = await fetch(`${apiBase}/transactions`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        // Map backend transactions to UI model
+        const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
+        const mapped: Transaction[] = data.map((t: any) => ({
+          id: t._id,
+          description: t.notes || t.category || "Transaction",
+          amount: t.type === "expense" ? -Math.abs(Number(t.amount)) : Math.abs(Number(t.amount)),
+          category: t.category,
+          type: t.type,
+          date: new Date(t.date).toISOString().slice(0, 10),
+          notes: t.notes,
+          memberId: t.memberKey,
+          memberName: memberNameMap.get(t.memberKey) || t.memberKey,
+        }))
+        setTransactions(mapped)
+      } catch {
+        // ignore
+      }
+    }
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  // Fetch budgets from backend when authenticated
+  useEffect(() => {
+    const loadBudgets = async () => {
+      if (!token) return
+      try {
+        const res = await fetch(`${apiBase}/budgets`, { headers: { Authorization: `Bearer ${token}` } })
+        if (res.ok) {
+          const data = await res.json()
+          const mapped: Budget[] = data.map((b: any) => ({
+            id: b._id,
+            category: b.category,
+            limit: b.amount,
+            spent: 0, // Will be calculated from transactions
+            period: b.period,
+          }))
+          setBudgets(mapped)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadBudgets()
+  }, [token, apiBase])
+
+  // Fetch goals from backend when authenticated
+  useEffect(() => {
+    const loadGoals = async () => {
+      if (!token) return
+      try {
+        const res = await fetch(`${apiBase}/goals`, { headers: { Authorization: `Bearer ${token}` } })
+        if (res.ok) {
+          const data = await res.json()
+          const mapped: Goal[] = data.map((g: any) => ({
+            id: g._id,
+            name: g.name,
+            targetAmount: g.targetAmount,
+            currentAmount: g.currentAmount,
+            targetDate: new Date(g.deadline).toISOString().slice(0, 10),
+            category: "General", // Backend doesn't have category field
+          }))
+          setGoals(mapped)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadGoals()
+  }, [token, apiBase])
+
   const [filterCategory, setFilterCategory] = useState("all")
   const [filterType, setFilterType] = useState("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -491,6 +815,40 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
 
   const [isListening, setIsListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const [profile, setProfile] = useState<any>(null)
+  const [newUsername, setNewUsername] = useState("")
+  const [oldPassword, setOldPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [member1Edit, setMember1Edit] = useState("")
+  const [member2Edit, setMember2Edit] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const receiptInputRef = useRef<HTMLInputElement | null>(null)
+  const [isScanning, setIsScanning] = useState(false)
+
+  // Keep local familyMembers in sync with profile data so names render correctly
+  useEffect(() => {
+    const membersFromProfile = profile?.account?.members as Array<{ key?: string; id?: string; name?: string }> | undefined
+    if (!membersFromProfile) return
+    
+    // Only process actual members from the database, don't create defaults
+    const processedMembers = membersFromProfile
+      .filter((m) => m && (m.key || m.id) && m.name && m.name.trim())
+      .map((m, idx) => ({
+        id: (m.key || m.id) as string,
+        name: m.name!.trim(),
+        email: '',
+        role: idx === 0 ? 'primary' as const : 'secondary' as const
+      }))
+
+    if (processedMembers.length) {
+      setFamilyMembers(processedMembers)
+      if (!currentMember || !processedMembers.find((m) => m.id === currentMember)) {
+        // Always default to member1 if it exists
+        setCurrentMember(processedMembers[0].id)
+      }
+    }
+  }, [profile])
 
   useEffect(() => {
     if (typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
@@ -607,6 +965,10 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     "Other",
   ]
 
+  // Main navigation tabs for the dashboard
+  const MAIN_TABS = ["dashboard", "transactions", "budgets", "goals", "insights"] as const
+  type MainTab = typeof MAIN_TABS[number]
+
   const calculateSpentAmount = (category: string) => {
     return transactions
       .filter((t) => t.category === category && t.type === "expense")
@@ -622,6 +984,564 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     handleVoiceInput()
   }
 
+  // Map backend OCR category keywords to UI category values
+  const mapOCRCategory = (raw: string | undefined): string => {
+    if (!raw) return "Other"
+    const v = raw.toLowerCase()
+    if (v.includes("food") || v.includes("dining") || v.includes("grocery")) return "Food & Dining"
+    if (v.includes("transport")) return "Transportation"
+    if (v.includes("entertainment") || v.includes("movie") || v.includes("cinema")) return "Entertainment"
+    if (v.includes("shopping") || v.includes("store") || v.includes("amazon") || v.includes("flipkart")) return "Shopping"
+    if (v.includes("utility") || v.includes("electricity") || v.includes("water") || v.includes("internet") || v.includes("phone")) return "Utilities"
+    if (v.includes("health")) return "Healthcare"
+    if (v.includes("income")) return "Income"
+    return "Other"
+  }
+
+  const triggerReceiptScan = () => {
+    if (receiptInputRef.current) receiptInputRef.current.click()
+  }
+
+  const handleReceiptSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!token) {
+      toast({ title: "Login required", description: "Please log in to scan receipts.", variant: "destructive" as any })
+      return
+    }
+    try {
+      setIsScanning(true)
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${apiBase}/receipts/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      })
+      if (!res.ok) throw new Error('Failed to scan receipt')
+      const data = await res.json()
+      const t = data.transaction as { description?: string; category?: string; type?: 'income'|'expense'; amount?: number; date?: string }
+      if (t) {
+        setFormDescription(t.description || '')
+        setFormAmount((t.amount ?? 0).toString())
+        setFormType(t.type || 'expense')
+        setFormCategory(mapOCRCategory(t.category))
+        setFormDate((t.date || new Date().toISOString().slice(0,10)))
+        setIsAddDialogOpen(true)
+        setShowTransactionForm(true)
+        toast({ title: 'Receipt scanned', description: 'We prefilled the transaction form. Please review and save.' })
+      }
+    } catch (err) {
+      toast({ title: 'Scan failed', description: 'Could not extract details from the receipt.', variant: 'destructive' as any })
+    } finally {
+      setIsScanning(false)
+      if (receiptInputRef.current) receiptInputRef.current.value = ''
+    }
+  }
+
+  // Derived: transactions scoped by view
+  const scopedTransactions = viewMode === "family"
+    ? transactions
+    : transactions.filter((t) => {
+        // Include transactions where the member is the primary owner
+        if (t.memberId === currentMember) return true
+        
+        // Include split transactions where the current member is in the splitWith list
+        if (t.splitWith && t.splitWith.includes(familyMembers.find(m => m.id === currentMember)?.name || "")) return true
+        
+        // Include split transactions where the member name matches (for temporary split IDs)
+        if (t.memberId && t.memberId.startsWith("split_") && t.memberName === familyMembers.find(m => m.id === currentMember)?.name) return true
+        
+        return false
+      })
+
+  // Derived: filtered transactions for UI list
+  const filteredTransactions = scopedTransactions.filter((t) => {
+    const byCategory = filterCategory === "all" || t.category === filterCategory
+    const byType = filterType === "all" || t.type === filterType
+    return byCategory && byType
+  })
+
+  // Derived: totals
+  const totalIncome = scopedTransactions
+    .filter((t) => t.type === "income")
+    .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0)
+
+  const totalExpenses = scopedTransactions
+    .filter((t) => t.type === "expense")
+    .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0)
+
+  // Derived: monthly trend for last 6 months
+  const monthlyData = (() => {
+    const now = new Date()
+    const months: { month: string; income: number; expenses: number; savings: number }[] = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+      const label = d.toLocaleString(undefined, { month: "short" })
+      const inMonth = scopedTransactions.filter((t) => new Date(t.date).getFullYear() === d.getFullYear() && new Date(t.date).getMonth() === d.getMonth())
+      const inc = inMonth.filter((t) => t.type === "income").reduce((s, t) => s + Math.abs(Number(t.amount || 0)), 0)
+      const exp = inMonth.filter((t) => t.type === "expense").reduce((s, t) => s + Math.abs(Number(t.amount || 0)), 0)
+      months.push({ month: label, income: inc, expenses: exp, savings: Math.max(inc - exp, 0) })
+    }
+    return months
+  })()
+
+  // Derived: weekly spending (last 7 days with data)
+  const weeklySpending = (() => {
+    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    const values = new Array(7).fill(0)
+    
+    // Get all expense transactions
+    const expenseTransactions = scopedTransactions.filter(t => t.type === "expense")
+    
+    console.log('Weekly spending calculation:', {
+      totalTransactions: scopedTransactions.length,
+      expenseTransactions: expenseTransactions.length,
+      transactions: expenseTransactions.map(t => ({
+        description: t.description,
+        amount: t.amount,
+        date: t.date,
+        category: t.category
+      }))
+    })
+    
+    // If we have expense transactions, show the last 7 days of data
+    if (expenseTransactions.length > 0) {
+      const now = new Date()
+      
+      // Calculate the last 7 days
+      for (let i = 6; i >= 0; i--) {
+        const dayDate = new Date(now)
+        dayDate.setDate(now.getDate() - i)
+        const dayOfWeek = dayDate.getDay()
+        
+        // Find expenses for this specific day
+        const dayExpenses = expenseTransactions.filter(t => {
+          const transactionDate = new Date(t.date)
+          return transactionDate.toDateString() === dayDate.toDateString()
+        })
+        
+        const dayTotal = dayExpenses.reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0)
+        values[dayOfWeek] = dayTotal
+        
+        if (dayTotal > 0) {
+          console.log(`${labels[dayOfWeek]} (${dayDate.toISOString().slice(0, 10)}): $${dayTotal}`)
+        }
+      }
+    }
+    
+    const result = labels.map((label, idx) => ({ day: label, amount: values[idx] }))
+    console.log('Weekly spending result:', result)
+    return result
+  })()
+
+  // Derived: expense categories pie
+  const expenseCategories = (() => {
+    const map = new Map<string, number>()
+    scopedTransactions.forEach((t) => {
+      if (t.type !== "expense") return
+      map.set(t.category, (map.get(t.category) || 0) + Math.abs(Number(t.amount || 0)))
+    })
+    const palette = ["#10b981", "#ef4444", "#3b82f6", "#f59e0b", "#8b5cf6", "#06b6d4", "#84cc16", "#e11d48"]
+    return Array.from(map.entries()).map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }))
+  })()
+
+  // Helpers
+  function getBudgetStatus(b: Budget) {
+    const percentage = b.limit > 0 ? (b.spent / b.limit) * 100 : 0
+    if (percentage >= 100) return { color: "text-red-600" }
+    if (percentage >= 80) return { color: "text-yellow-600" }
+    return { color: "text-emerald-600" }
+  }
+
+  // Budgets filter helper (extend later if needed)
+  function getFilteredBudgets(): Budget[] {
+    // For now, budgets are global; in future this can filter by member/view
+    return updatedBudgets
+  }
+
+  // Transaction form helpers
+  const resetForm = () => {
+    setFormDescription("")
+    setFormAmount("")
+    setFormCategory("")
+    setFormType("expense")
+    setFormDate("")
+    setFormNotes("")
+    setFormSplitWith("")
+  }
+
+  const handleAddTransaction = async () => {
+    const splitWithMembers = formSplitWith ? formSplitWith.split(",").map((s) => s.trim()).filter(Boolean) : []
+    const payload = {
+      memberKey: currentMember,
+      amount: Number(formAmount || 0),
+      type: formType,
+      category: formCategory || (formType === "income" ? "Income" : "Other"),
+      date: formDate || new Date().toISOString().slice(0, 10),
+      notes: formDescription || formNotes,
+      splitWith: splitWithMembers,
+    }
+    try {
+      if (token) {
+        await fetch(`${apiBase}/transactions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        })
+        // reload
+        const res = await fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+        if (res.ok) {
+          const data = await res.json()
+          const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
+          const mapped: Transaction[] = data.map((t: any) => ({
+            id: t._id,
+            description: t.notes || t.category || "Transaction",
+            amount: t.type === "expense" ? -Math.abs(Number(t.amount)) : Math.abs(Number(t.amount)),
+            category: t.category,
+            type: t.type,
+            date: new Date(t.date).toISOString().slice(0, 10),
+            notes: t.notes,
+            splitWith: t.splitWith || [],
+            memberId: t.memberKey,
+            memberName: memberNameMap.get(t.memberKey) || t.memberKey,
+          }))
+          setTransactions(mapped)
+        }
+      } else {
+        // Handle split transactions locally
+        if (splitWithMembers.length > 0) {
+          const totalMembers = 1 + splitWithMembers.length // current member + split members
+          const splitAmount = payload.amount / totalMembers
+
+          const newTransactions: Transaction[] = []
+
+          // Add transaction for current member
+          const currentMemberTx: Transaction = {
+            id: String(Date.now()),
+            description: payload.notes || payload.category,
+            amount: payload.type === "expense" ? -Math.abs(splitAmount) : Math.abs(splitAmount),
+            category: payload.category,
+            type: payload.type,
+            date: payload.date,
+            notes: payload.notes,
+            splitWith: payload.splitWith,
+            memberId: currentMember,
+            memberName: familyMembers.find((m) => m.id === currentMember)?.name || currentMember,
+          }
+          newTransactions.push(currentMemberTx)
+
+          // Add transactions for split members
+          splitWithMembers.forEach((memberName, index) => {
+            const splitMemberTx: Transaction = {
+              id: String(Date.now() + index + 1),
+              description: `${payload.notes || payload.category} (split with ${familyMembers.find((m) => m.id === currentMember)?.name || currentMember})`,
+              amount: payload.type === "expense" ? -Math.abs(splitAmount) : Math.abs(splitAmount),
+              category: payload.category,
+              type: payload.type,
+              date: payload.date,
+              notes: `Split transaction with ${memberName}`,
+              splitWith: payload.splitWith,
+              memberId: "split_" + memberName, // Temporary ID for split members
+              memberName: memberName,
+            }
+            newTransactions.push(splitMemberTx)
+          })
+
+          setTransactions((prev) => [...newTransactions, ...prev])
+          toast({ title: "Success", description: `Transaction added and split with ${splitWithMembers.join(", ")}` })
+        } else {
+          // Single transaction (no split)
+          const newTx: Transaction = {
+            id: String(Date.now()),
+            description: payload.notes || payload.category,
+            amount: payload.type === "expense" ? -Math.abs(payload.amount) : Math.abs(payload.amount),
+            category: payload.category,
+            type: payload.type,
+            date: payload.date,
+            notes: payload.notes,
+            memberId: currentMember,
+            memberName: familyMembers.find((m) => m.id === currentMember)?.name || currentMember,
+          }
+          setTransactions((prev) => [newTx, ...prev])
+        }
+      }
+    } finally {
+      resetForm()
+    }
+  }
+
+  const startEdit = (tx: Transaction) => {
+    setEditingTransaction(tx)
+    setFormDescription(tx.description || "")
+    setFormAmount(String(Math.abs(tx.amount)))
+    setFormCategory(tx.category)
+    setFormType(tx.type)
+    setFormDate(tx.date)
+    setFormNotes(tx.notes || "")
+    setFormSplitWith(tx.splitWith?.join(", ") || "")
+  }
+
+  const handleDeleteTransaction = async (id: string) => {
+    if (token) {
+      await fetch(`${apiBase}/transactions/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } })
+      const res = await fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) {
+        const data = await res.json()
+        const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
+        const mapped: Transaction[] = data.map((t: any) => ({
+          id: t._id,
+          description: t.notes || t.category || "Transaction",
+          amount: t.type === "expense" ? -Math.abs(Number(t.amount)) : Math.abs(Number(t.amount)),
+          category: t.category,
+          type: t.type,
+          date: new Date(t.date).toISOString().slice(0, 10),
+          notes: t.notes,
+          memberId: t.memberKey,
+          memberName: memberNameMap.get(t.memberKey) || t.memberKey,
+        }))
+        setTransactions(mapped)
+      }
+    } else {
+      setTransactions((prev) => prev.filter((t) => t.id !== id))
+    }
+  }
+
+  const handleEditTransaction = async () => {
+    if (!editingTransaction) return
+    const payload = {
+      memberKey: editingTransaction.memberId || currentMember,
+      amount: Number(formAmount || 0),
+      type: formType,
+      category: formCategory || editingTransaction.category,
+      date: formDate || editingTransaction.date,
+      notes: formDescription || formNotes,
+    }
+    if (token) {
+      await fetch(`${apiBase}/transactions/${editingTransaction.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      })
+      const res = await fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) {
+        const data = await res.json()
+        const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
+        const mapped: Transaction[] = data.map((t: any) => ({
+          id: t._id,
+          description: t.notes || t.category || "Transaction",
+          amount: t.type === "expense" ? -Math.abs(Number(t.amount)) : Math.abs(Number(t.amount)),
+          category: t.category,
+          type: t.type,
+          date: new Date(t.date).toISOString().slice(0, 10),
+          notes: t.notes,
+          memberId: t.memberKey,
+          memberName: memberNameMap.get(t.memberKey) || t.memberKey,
+        }))
+        setTransactions(mapped)
+      }
+    } else {
+      setTransactions((prev) => prev.map((t) => t.id === editingTransaction.id ? {
+        ...t,
+        description: payload.notes || t.description,
+        amount: payload.type === "expense" ? -Math.abs(payload.amount) : Math.abs(payload.amount),
+        category: payload.category,
+        type: payload.type,
+        date: payload.date,
+        notes: payload.notes,
+      } : t))
+    }
+    setEditingTransaction(null)
+    resetForm()
+  }
+
+  // Budget helpers (client-side)
+  const resetBudgetForm = () => {
+    setBudgetCategory("")
+    setBudgetLimit("")
+    setBudgetPeriod("monthly")
+  }
+
+  const handleAddBudget = async () => {
+    const b: Budget = {
+      id: String(Date.now()),
+      category: budgetCategory || "Other",
+      limit: Number(budgetLimit || 0),
+      spent: 0,
+      period: budgetPeriod,
+    }
+    
+    try {
+      if (token) {
+        // Save to backend
+        const payload = {
+          memberKey: viewMode === "family" ? null : currentMember,
+          category: b.category,
+          amount: b.limit,
+          period: b.period,
+        }
+        
+        const res = await fetch(`${apiBase}/budgets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        })
+        
+        if (res.ok) {
+          const savedBudget = await res.json()
+          b.id = savedBudget._id // Use backend ID
+          toast({ title: "Success", description: "Budget created successfully!" })
+        } else {
+          throw new Error("Failed to save budget")
+        }
+      } else {
+        // Local fallback
+        toast({ title: "Success", description: "Budget created (local only)" })
+      }
+      
+      setBudgets((prev) => [...prev, b])
+      resetBudgetForm()
+      setIsAddBudgetDialogOpen(false)
+      setShowBudgetForm(false)
+    } catch (error) {
+      console.error('Budget creation error:', error)
+      toast({ title: "Error", description: "Failed to create budget. Please try again.", variant: "destructive" as any })
+    }
+  }
+
+  const startEditBudget = (b: Budget) => {
+    setEditingBudget(b)
+    setBudgetCategory(b.category)
+    setBudgetLimit(String(b.limit))
+    setBudgetPeriod(b.period)
+  }
+
+  const handleDeleteBudget = (id: string) => {
+    setBudgets((prev) => prev.filter((b) => b.id !== id))
+  }
+
+  const handleEditBudget = () => {
+    if (!editingBudget) return
+    setBudgets((prev) => prev.map((b) => b.id === editingBudget.id ? {
+      ...b,
+      category: budgetCategory || b.category,
+      limit: Number(budgetLimit || b.limit),
+      period: budgetPeriod,
+    } : b))
+    setEditingBudget(null)
+    resetBudgetForm()
+  }
+
+  // Goal helpers (client-side)
+  const resetGoalForm = () => {
+    setGoalName("")
+    setGoalTarget("")
+    setGoalCurrent("")
+    setGoalDate("")
+    setGoalCategory("")
+  }
+
+  const handleAddGoal = async () => {
+    const g: Goal = {
+      id: String(Date.now()),
+      name: goalName || "New Goal",
+      targetAmount: Number(goalTarget || 0),
+      currentAmount: Number(goalCurrent || 0),
+      targetDate: goalDate || new Date().toISOString().slice(0, 10),
+      category: goalCategory || "General",
+    }
+    
+    try {
+      if (token) {
+        // Save to backend
+        const payload = {
+          memberKey: viewMode === "family" ? null : currentMember,
+          name: g.name,
+          targetAmount: g.targetAmount,
+          currentAmount: g.currentAmount,
+          deadline: g.targetDate,
+        }
+        
+        const res = await fetch(`${apiBase}/goals`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        })
+        
+        if (res.ok) {
+          const savedGoal = await res.json()
+          g.id = savedGoal._id // Use backend ID
+          toast({ title: "Success", description: "Goal created successfully!" })
+        } else {
+          throw new Error("Failed to save goal")
+        }
+      } else {
+        // Local fallback
+        toast({ title: "Success", description: "Goal created (local only)" })
+      }
+      
+      setGoals((prev) => [...prev, g])
+      resetGoalForm()
+      setIsAddGoalDialogOpen(false)
+    } catch (error) {
+      console.error('Goal creation error:', error)
+      toast({ title: "Error", description: "Failed to create goal. Please try again.", variant: "destructive" as any })
+    }
+  }
+
+  const addFamilyMember = async () => {
+    if (!memberName || !memberName.trim()) return
+    const hasMember2 = familyMembers.some((m) => m.id === "member2")
+    if (hasMember2) return
+    
+    try {
+      const m1Name = familyMembers.find((m) => m.id === "member1")?.name || familyMembers[0]?.name || "Member 1"
+      const requestBody = { 
+        members: [ 
+          { key: "member1", name: m1Name }, 
+          { key: "member2", name: memberName.trim() } 
+        ] 
+      }
+      
+      console.log('Adding member with request:', requestBody)
+      
+      const res = await fetch(`${apiBase}/auth/members`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(requestBody)
+      })
+      
+      if (res.ok) {
+        const result = await res.json()
+        console.log('Add member response:', result)
+        
+        // Refresh user data to get updated members
+        const me = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+        if (me.ok) {
+          const data = await me.json()
+          const apiMembers: Array<{ key: "member1" | "member2"; name: string }> = data.account?.members || []
+          const mapped = apiMembers.map((m) => ({ id: m.key, name: m.name, email: "", role: m.key === "member1" ? "primary" : "secondary" }))
+          setFamilyMembers(mapped as any)
+          setProfile(data)
+          setCurrentMember("member2")
+          toast({ title: "Success", description: `${memberName.trim()} has been added as a family member!` })
+        }
+      } else {
+        const errorData = await res.json()
+        console.error('Add member failed:', errorData)
+        toast({ title: "Error", description: errorData.message || "Failed to add family member", variant: "destructive" as any })
+      }
+    } catch (error) {
+      console.error('Add member error:', error)
+      toast({ title: "Error", description: "Failed to add family member. Please try again.", variant: "destructive" as any })
+    } finally {
+      setMemberName("")
+      setMemberEmail("")
+      setIsAddMemberDialogOpen(false)
+    }
+  }
+
   const handleExport = (format: "csv" | "pdf") => {
     const data = transactions.map((t) => ({
       Date: t.date,
@@ -635,7 +1555,6 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
 
     if (format === "csv") {
       const csv = [Object.keys(data[0]).join(","), ...data.map((row) => Object.values(row).join(","))].join("\n")
-
       const blob = new Blob([csv], { type: "text/csv" })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
@@ -646,261 +1565,27 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     setIsExportDialogOpen(false)
   }
 
-  const addFamilyMember = () => {
-    if (!memberName || !memberEmail) return
-
-    const newMember: FamilyMember = {
-      id: Date.now().toString(),
-      name: memberName,
-      email: memberEmail,
-      role: "secondary",
-    }
-
-    setFamilyMembers([...familyMembers, newMember])
-    setMemberName("")
-    setMemberEmail("")
-    setIsAddMemberDialogOpen(false)
-  }
-
-  const removeFamilyMember = (memberId: string) => {
-    if (familyMembers.find((m) => m.id === memberId)?.role === "primary") return
-    setFamilyMembers(familyMembers.filter((m) => m.id !== memberId))
-    if (currentMember === memberId) {
-      setCurrentMember("1")
-    }
-  }
-
-  const handleAddTransaction = () => {
-    if (!formDescription || !formAmount || !formCategory || !formDate) return
-
-    const currentMemberData = familyMembers.find((m) => m.id === currentMember)
-    const newTransaction: Transaction = {
-      id: Date.now().toString(),
-      description: formDescription,
-      amount:
-        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
-      category: formCategory,
-      type: formType,
-      date: formDate,
-      notes: formNotes || undefined,
-      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
-      memberId: currentMember,
-      memberName: currentMemberData?.name || "Unknown",
-    }
-
-    setTransactions([newTransaction, ...transactions])
-    resetForm()
-    setIsAddDialogOpen(false)
-  }
-
-  const handleEditTransaction = () => {
-    if (!editingTransaction || !formDescription || !formAmount || !formCategory || !formDate) return
-
-    const updatedTransaction: Transaction = {
-      ...editingTransaction,
-      description: formDescription,
-      amount:
-        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
-      category: formCategory,
-      type: formType,
-      date: formDate,
-      notes: formNotes || undefined,
-      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
-    }
-
-    setTransactions(transactions.map((t) => (t.id === editingTransaction.id ? updatedTransaction : t)))
-    resetForm()
-    setEditingTransaction(null)
-  }
-
-  const handleDeleteTransaction = (id: string) => {
-    setTransactions(transactions.filter((t) => t.id !== id))
-  }
-
-  const startEdit = (transaction: Transaction) => {
-    setEditingTransaction(transaction)
-    setFormDescription(transaction.description)
-    setFormAmount(Math.abs(transaction.amount).toString())
-    setFormCategory(transaction.category)
-    setFormType(transaction.type)
-    setFormDate(transaction.date)
-    setFormNotes(transaction.notes || "")
-    setFormSplitWith(transaction.splitWith?.join(", ") || "")
-  }
-
-  const resetForm = () => {
-    setFormDescription("")
-    setFormAmount("")
-    setFormCategory("")
-    setFormType("expense")
-    setFormDate("")
-    setFormNotes("")
-    setFormSplitWith("")
-  }
-
-  const handleAddBudget = () => {
-    if (!budgetCategory || !budgetLimit) return
-
-    const newBudget: Budget = {
-      id: Date.now().toString(),
-      category: budgetCategory,
-      limit: Number.parseFloat(budgetLimit),
-      spent: calculateSpentAmount(budgetCategory),
-      period: budgetPeriod,
-    }
-
-    setBudgets([...budgets, newBudget])
-    resetBudgetForm()
-    setIsAddBudgetDialogOpen(false)
-  }
-
-  const handleEditBudget = () => {
-    if (!editingBudget || !budgetCategory || !budgetLimit) return
-
-    const updatedBudget: Budget = {
-      ...editingBudget,
-      category: budgetCategory,
-      limit: Number.parseFloat(budgetLimit),
-      spent: calculateSpentAmount(budgetCategory),
-      period: budgetPeriod,
-    }
-
-    setBudgets(budgets.map((b) => (b.id === editingBudget.id ? updatedBudget : b)))
-    resetBudgetForm()
-    setEditingBudget(null)
-  }
-
-  const handleDeleteBudget = (id: string) => {
-    setBudgets(budgets.filter((b) => b.id !== id))
-  }
-
-  const startEditBudget = (budget: Budget) => {
-    setEditingBudget(budget)
-    setBudgetCategory(budget.category)
-    setBudgetLimit(budget.limit.toString())
-    setBudgetPeriod(budget.period)
-  }
-
-  const resetBudgetForm = () => {
-    setBudgetCategory("")
-    setBudgetLimit("")
-    setBudgetPeriod("monthly")
-  }
-
-  const handleAddGoal = () => {
-    if (!goalName || !goalTarget || !goalCurrent || !goalDate || !goalCategory) return
-
-    const newGoal: Goal = {
-      id: Date.now().toString(),
-      name: goalName,
-      targetAmount: Number.parseFloat(goalTarget),
-      currentAmount: Number.parseFloat(goalCurrent),
-      targetDate: goalDate,
-      category: goalCategory,
-    }
-
-    setGoals([...goals, newGoal])
-    resetGoalForm()
-    setIsAddGoalDialogOpen(false)
-  }
-
-  const resetGoalForm = () => {
-    setGoalName("")
-    setGoalTarget("")
-    setGoalCurrent("")
-    setGoalDate("")
-    setGoalCategory("")
-  }
-
-  const getBudgetStatus = (budget: Budget) => {
-    const percentage = (budget.spent / budget.limit) * 100
-    if (percentage >= 100) return { status: "over", color: "text-red-600", bgColor: "bg-red-500" }
-    if (percentage >= 80) return { status: "warning", color: "text-yellow-600", bgColor: "bg-yellow-500" }
-    return { status: "good", color: "text-emerald-600", bgColor: "bg-emerald-500" }
-  }
-
-  const getFilteredTransactions = () => {
-    if (viewMode === "family") {
-      return transactions
-    }
-    return transactions.filter((t) => t.memberId === currentMember)
-  }
-
-  const getFilteredBudgets = () => {
-    // For now, budgets are shared across family members
-    return budgets
-  }
-
-  const filteredTransactions = getFilteredTransactions()
-  const totalIncome = filteredTransactions.filter((t) => t.amount > 0).reduce((sum, t) => sum + t.amount, 0)
-  const totalExpenses = Math.abs(filteredTransactions.filter((t) => t.amount < 0).reduce((sum, t) => sum + t.amount, 0))
-
-  const currentBalance = totalIncome - totalExpenses
-
-  const monthlyData = [
-    { month: "Jan", income: 0, expenses: 0, savings: 0 },
-    { month: "Feb", income: 0, expenses: 0, savings: 0 },
-    { month: "Mar", income: 0, expenses: 0, savings: 0 },
-    { month: "Apr", income: 0, expenses: 0, savings: 0 },
-    { month: "May", income: 0, expenses: 0, savings: 0 },
-    { month: "Jun", income: totalIncome, expenses: totalExpenses, savings: currentBalance },
-  ]
-
-  const expenseCategories = categories
-    .filter((category) => category !== "Income" && category !== "Investment")
-    .map((category) => {
-      const spent = calculateSpentAmount(category)
-      return {
-        name: category,
-        value: spent,
-        color: getColorForCategory(category),
-      }
-    })
-    .filter((category) => category.value > 0) // Only show categories with expenses
-
-  function getColorForCategory(category: string): string {
-    const colors: { [key: string]: string } = {
-      "Food & Dining": "#10b981",
-      Transportation: "#3b82f6",
-      Utilities: "#f59e0b",
-      Entertainment: "#ef4444",
-      Shopping: "#8b5cf6",
-      Healthcare: "#06b6d4",
-      Other: "#6b7280",
-    }
-    return colors[category] || "#6b7280"
-  }
-
-  const weeklySpending = [
-    { day: "Mon", amount: 0 },
-    { day: "Tue", amount: 0 },
-    { day: "Wed", amount: 0 },
-    { day: "Thu", amount: 0 },
-    { day: "Fri", amount: 0 },
-    { day: "Sat", amount: 0 },
-    { day: "Sun", amount: 0 },
-  ]
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50">
-      <header className="bg-white shadow-sm border-b">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <header className="bg-white dark:bg-gray-900 shadow-sm border-b dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
+            {/* Header left section: logo + member selector + view toggle */}
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
                 <DollarSign className="h-8 w-8 text-emerald-600" />
-                <h1 className="text-2xl font-bold text-gray-900">FinanceTracker</h1>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">FinanceTracker</h1>
               </div>
 
               <div className="flex items-center space-x-2 ml-8">
                 <Select value={currentMember} onValueChange={setCurrentMember}>
                   <SelectTrigger className="w-40">
-                    <SelectValue />
+                    <SelectValue placeholder="Select member" />
                   </SelectTrigger>
                   <SelectContent>
                     {familyMembers.map((member) => (
                       <SelectItem key={member.id} value={member.id}>
-                        {member.name}
+                        {member.name || (member.id === 'member1' ? 'Member 1' : member.id === 'member2' ? 'Member 2' : member.id)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -917,38 +1602,113 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               </div>
             </div>
 
+            {/* Header right section */}
             <div className="flex items-center space-x-4">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setIsAddMemberDialogOpen(true)}
-                disabled={familyMembers.length >= 2}
+                disabled={familyMembers.some((m) => m.id === 'member2')}
               >
                 <UserPlus className="h-4 w-4 mr-1" />
                 Add Member
               </Button>
-              <Button variant="outline" size="sm">
-                <Bell className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="sm">
-                <Settings className="h-4 w-4" />
-              </Button>
+              <ThemeToggle />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" aria-label="Settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setActiveTab("profile")}>Profile</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("account")}>Account Details</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onLogout}>Logout</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* Add Member Dialog */}
+              <Dialog open={isAddMemberDialogOpen} onOpenChange={setIsAddMemberDialogOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add Family Member</DialogTitle>
+                    <DialogDescription>Enter the name for the additional family member.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <Label htmlFor="new-member-name">Member Name</Label>
+                      <Input
+                        id="new-member-name"
+                        placeholder="e.g., Alex"
+                        value={memberName}
+                        onChange={(e) => setMemberName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => { setIsAddMemberDialogOpen(false); setMemberName("") }}>Cancel</Button>
+                    <Button
+                      onClick={async () => {
+                        const name = memberName.trim()
+                        if (!name) return
+                        setSaving(true); setMessage(null)
+                        try {
+                          const res = await fetch(`${apiBase}/auth/members`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ members: [ { key: 'member1', name: member1Edit || familyMembers[0]?.name || 'Member 1' }, { key: 'member2', name } ] })
+                          })
+                          if (res.ok) {
+                            setMessage('Member added')
+                            const me = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+                            if (me.ok) {
+                              const data = await me.json()
+                              setProfile(data)
+                              const apiMembers: Array<{ key: 'member1' | 'member2'; name: string }> = data?.account?.members || []
+                              const mapped = apiMembers
+                                .filter((m: any) => m.key === 'member1' || (m.key === 'member2' && m.name && m.name.trim() && m.name.trim() !== 'Member 2'))
+                                .map((m: any) => ({ id: m.key, name: m.name }))
+                              setFamilyMembers(
+                                mapped.length
+                                  ? mapped.map((m, idx) => ({ id: m.id, name: m.name, email: '', role: idx === 0 ? 'primary' : 'secondary' }))
+                                  : [{ id: 'member1', name: member1Edit || 'Member 1', email: '', role: 'primary' }]
+                              )
+                              const m1 = apiMembers.find((m: any) => m.key === 'member1')
+                              const m2 = apiMembers.find((m: any) => m.key === 'member2')
+                              setMember1Edit(m1?.name || '')
+                              setMember2Edit(m2?.name || '')
+                              if (m2?.name) setCurrentMember('member2')
+                            }
+                            setIsAddMemberDialogOpen(false)
+                            setMemberName("")
+                          } else {
+                            setMessage('Failed to add member')
+                          }
+                        } finally {
+                          setSaving(false)
+                        }
+                      }}
+                      disabled={saving}
+                    >Save</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </div>
       </header>
 
-      <nav className="bg-white border-b">
+      <nav className="bg-white dark:bg-gray-900 border-b dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-8">
             <div className="flex items-center space-x-2 py-4">
               <Badge variant={viewMode === "individual" ? "default" : "secondary"}>
                 {viewMode === "individual"
-                  ? `${familyMembers.find((m) => m.id === currentMember)?.name}'s View`
+                  ? `${(familyMembers.find((m) => m.id === currentMember)?.name) || (currentMember === 'member1' ? 'Member 1' : currentMember === 'member2' ? 'Member 2' : 'Member')}'s View`
                   : "Family Dashboard"}
               </Badge>
             </div>
-            {["dashboard", "transactions", "budgets", "goals", "insights"].map((tab) => (
+            {MAIN_TABS.map((tab: MainTab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -971,7 +1731,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
             <div className="mb-8">
               <h2 className="text-3xl font-bold text-gray-900 mb-2">
                 {viewMode === "individual"
-                  ? `${familyMembers.find((m) => m.id === currentMember)?.name}'s Dashboard`
+                  ? `${(familyMembers.find((m) => m.id === currentMember)?.name) || (currentMember === 'member1' ? 'Member 1' : currentMember === 'member2' ? 'Member 2' : 'Member')}` + "'s Dashboard"
                   : "Family Dashboard"}
               </h2>
               <p className="text-gray-600">
@@ -1105,16 +1865,22 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                   ) : (
                     <ResponsiveContainer width="100%" height={300}>
                       <RechartsPieChart>
-                        <RechartsPieChart data={expenseCategories} cx="50%" cy="50%" outerRadius={100} dataKey="value">
+                        <Pie data={expenseCategories} cx="50%" cy="50%" outerRadius={100} dataKey="value" nameKey="name">
                           {expenseCategories.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
-                        </RechartsPieChart>
+                        </Pie>
                         <Tooltip formatter={(value) => [`$${value}`, "Spent"]} />
-                        <Legend formatter={(value, entry) => `${value}: $${entry.payload.value}`} />
+                        <Legend
+                          formatter={(value: any, entry: any) => {
+                            const v = entry && entry.payload && typeof entry.payload.value === 'number' ? entry.payload.value : 0
+                            return `${value}: $${v}`
+                          }}
+                        />
                       </RechartsPieChart>
                     </ResponsiveContainer>
                   )}
+
                 </CardContent>
               </Card>
             </div>
@@ -1272,6 +2038,75 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
           </div>
         )}
 
+        {activeTab === "account" && (
+          <div className="px-4 py-6 sm:px-0">
+            <Card>
+              <CardHeader>
+                <CardTitle>Account Details</CardTitle>
+                <CardDescription>Your family account settings</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-sm text-gray-700">
+                  <div><span className="font-medium">Account ID:</span> {profile?.account?.id || "-"}</div>
+                </div>
+                <div className="pt-2">
+                  <div className="font-medium mb-2">Members</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="m1">Member 1</Label>
+                      <Input id="m1" value={member1Edit} onChange={(e) => setMember1Edit(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor="m2">Member 2</Label>
+                      <Input id="m2" value={member2Edit} onChange={(e) => setMember2Edit(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        setSaving(true); setMessage(null)
+                        try {
+                          const res = await fetch(`${apiBase}/auth/members`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ members: [ { key: 'member1', name: member1Edit }, { key: 'member2', name: member2Edit } ] })
+                          })
+                          if (res.ok) {
+                            setMessage('Members updated')
+                            // reload profile & update local member list
+                            const me = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+                            if (me.ok) {
+                              const data = await me.json()
+                              setProfile(data)
+                              const apiMembers: Array<{ key: 'member1' | 'member2'; name: string }> = data?.account?.members || []
+                              const mapped = apiMembers
+                                .filter((m: any) => m.key === 'member1' || (m.key === 'member2' && m.name && m.name.trim() && m.name.trim() !== 'Member 2'))
+                                .map((m: any) => ({ id: m.key, name: m.name }))
+                              setFamilyMembers(
+                                mapped.length
+                                  ? mapped.map((m, idx) => ({ id: m.id, name: m.name, email: '', role: idx === 0 ? 'primary' : 'secondary' }))
+                                  : [{ id: 'member1', name: member1Edit || 'Member 1', email: '', role: 'primary' }]
+                              )
+                              const m1 = apiMembers.find((m: any) => m.key === 'member1')
+                              const m2 = apiMembers.find((m: any) => m.key === 'member2')
+                              setMember1Edit(m1?.name || '')
+                              setMember2Edit(m2?.name || '')
+                            }
+                          } else {
+                            setMessage('Failed to update members')
+                          }
+                        } finally { setSaving(false) }
+                      }}
+                      disabled={saving}
+                    >Save Changes</Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {activeTab === "transactions" && (
           <div className="px-4 py-6 sm:px-0">
             <div className="flex justify-between items-center mb-8">
@@ -1296,6 +2131,16 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                       Voice Entry
                     </>
                   )}
+                </Button>
+                <input
+                  ref={receiptInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleReceiptSelected}
+                />
+                <Button onClick={triggerReceiptScan} variant="outline" disabled={isScanning}>
+                  {isScanning ? 'Scanning…' : 'Scan Receipt'}
                 </Button>
                 <Dialog
                   open={isAddDialogOpen || showTransactionForm}
@@ -2011,61 +2856,41 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               {aiInsights.map((insight) => (
                 <Card
                   key={insight.id}
-                  className={`${
+                  className={`dark:bg-gray-900 dark:border-gray-800 ${
                     insight.type === "warning"
-                      ? "border-red-200 bg-red-50"
-                      : insight.type === "suggestion"
-                        ? "border-blue-200 bg-blue-50"
-                        : "border-green-200 bg-green-50"
+                      ? "border-yellow-500/40"
+                      : insight.type === "achievement"
+                      ? "border-emerald-500/40"
+                      : "border-blue-500/40"
                   }`}
                 >
                   <CardHeader>
-                    <div className="flex items-center space-x-3">
-                      {insight.type === "warning" ? (
-                        <AlertTriangle className="h-6 w-6 text-red-600" />
-                      ) : insight.type === "suggestion" ? (
-                        <Lightbulb className="h-6 w-6 text-blue-600" />
-                      ) : (
-                        <CheckCircle className="h-6 w-6 text-green-600" />
-                      )}
-                      <div>
-                        <CardTitle
-                          className={`text-lg ${
-                            insight.type === "warning"
-                              ? "text-red-800"
-                              : insight.type === "suggestion"
-                                ? "text-blue-800"
-                                : "text-green-800"
-                          }`}
-                        >
-                          {insight.title}
-                        </CardTitle>
-                        <Badge
-                          variant={
-                            insight.type === "warning"
-                              ? "destructive"
-                              : insight.type === "suggestion"
-                                ? "default"
-                                : "secondary"
-                          }
-                        >
-                          {insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}
-                        </Badge>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {insight.type === "warning" ? (
+                          <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                        ) : insight.type === "achievement" ? (
+                          <CheckCircle className="h-5 w-5 text-emerald-500" />
+                        ) : (
+                          <Lightbulb className="h-5 w-5 text-blue-500" />
+                        )}
+                        <CardTitle className="text-gray-900 dark:text-white">{insight.title}</CardTitle>
                       </div>
+                      <Badge
+                        variant={
+                          insight.type === "warning"
+                            ? "destructive"
+                            : insight.type === "suggestion"
+                              ? "default"
+                              : "secondary"
+                        }
+                      >
+                        {insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}
+                      </Badge>
                     </div>
+                    <CardDescription className="text-gray-700 dark:text-gray-300">{insight.description}</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <p
-                      className={`mb-4 ${
-                        insight.type === "warning"
-                          ? "text-red-700"
-                          : insight.type === "suggestion"
-                            ? "text-blue-700"
-                            : "text-green-700"
-                      }`}
-                    >
-                      {insight.description}
-                    </p>
                     {insight.action && (
                       <Button
                         variant={insight.type === "warning" ? "destructive" : "default"}
