@@ -77,6 +77,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import {
   DollarSign,
   TrendingUp,
@@ -167,152 +168,56 @@ interface AIInsight {
 }
 
 export default function HomePage() {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
+  // Restore auth on refresh: if token exists, fetch profile and stay on dashboard
+  useEffect(() => {
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      if (token) {
+        setShowLanding(false)
+        setIsAuthenticated(true)
+        fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then(async (r) => (await r.json()))
+          .then((me) => {
+            if (me && typeof me.monthlyIncome === 'number') {
+              setProfileIncome(Number(me.monthlyIncome) || 0)
+            }
+          })
+          .catch(() => {
+            // invalid/expired token → clear and go to landing
+            localStorage.removeItem('token')
+            setIsAuthenticated(false)
+            setShowLanding(true)
+          })
+      }
+    } catch {
+      // ignore
+    }
+  }, [API_BASE])
   const [showLanding, setShowLanding] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [name, setName] = useState("")
   const [monthlyIncome, setMonthlyIncome] = useState("")
+  const [profileIncome, setProfileIncome] = useState<number>(0)
   const [currentLoan, setCurrentLoan] = useState("")
-  const [token, setToken] = useState<string | null>(null)
-  const [members, setMembers] = useState<Array<{ id: string; name: string }>>([])
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000"
-  const { toast } = useToast()
-
-  // Load authentication state from localStorage on component mount
-  useEffect(() => {
-    const initializeAuth = async () => {
-      const savedToken = localStorage.getItem('authToken')
-      const savedMembers = localStorage.getItem('authMembers')
-      
-      if (savedToken) {
-        // Verify token is still valid
-        try {
-          const res = await fetch(`${API_BASE}/auth/me`, {
-            headers: { Authorization: `Bearer ${savedToken}` },
-          })
-          
-          if (res.ok) {
-            setToken(savedToken)
-            setIsAuthenticated(true)
-            setShowLanding(false)
-            
-            if (savedMembers) {
-              try {
-                const parsedMembers = JSON.parse(savedMembers)
-                setMembers(parsedMembers)
-              } catch (error) {
-                console.error('Error parsing saved members:', error)
-              }
-            }
-          } else {
-            // Token is invalid, clear localStorage
-            localStorage.removeItem('authToken')
-            localStorage.removeItem('authMembers')
-          }
-        } catch (error) {
-          // Network error or invalid token, clear localStorage
-          localStorage.removeItem('authToken')
-          localStorage.removeItem('authMembers')
-        }
-      }
-    }
-    
-    initializeAuth()
-  }, [API_BASE])
-
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
-      if (!res.ok) throw new Error("Login failed")
-      const data = await res.json()
-      const jwt = data.token as string
-      setToken(jwt)
-      const apiMembers: Array<{ key: "member1" | "member2"; name: string }> = data.account?.members || []
-      const mapped = apiMembers
-        .filter((m) => m && m.key && m.name && m.name.trim())
-        .map((m) => ({ id: m.key, name: m.name }))
-      setMembers(mapped)
+    // Mock authentication - in real app, this would validate credentials
+    if (email && password) {
       setIsAuthenticated(true)
-      
-      // Save to localStorage
-      localStorage.setItem('authToken', jwt)
-      localStorage.setItem('authMembers', JSON.stringify(mapped))
-      
-      toast({ title: "Logged in", description: "Welcome back!" })
-    } catch (err) {
-      toast({ title: "Login failed", description: "Please check your credentials.", variant: "destructive" as any })
     }
   }
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email || !password || !name || !monthlyIncome) {
-      toast({ title: "Missing info", description: "Please complete all required fields.", variant: "destructive" as any })
-      return
-    }
-    if (password.length < 6) {
-      toast({ title: "Weak password", description: "Password must be at least 6 characters.", variant: "destructive" as any })
-      return
-    }
-    try {
-      const res = await fetch(`${API_BASE}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: name,
-          email,
-          password,
-          member1Name: name
-        }),
-      })
-      if (!res.ok) throw new Error("Register failed")
-      const data = await res.json()
-      const jwt = data.token as string
-      setToken(jwt)
-      const apiMembers: Array<{ key: "member1" | "member2"; name: string }> = data.account?.members || []
-      const mapped = apiMembers
-        .filter((m) => m && m.key && m.name && m.name.trim())
-        .map((m) => ({ id: m.key, name: m.name }))
-      setMembers(mapped)
-      
-      // Save to localStorage
-      localStorage.setItem('authToken', jwt)
-      localStorage.setItem('authMembers', JSON.stringify(mapped))
-
-      // Create initial income transaction for member1
-      if (jwt && monthlyIncome) {
-        try {
-          await fetch(`${API_BASE}/transactions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${jwt}`,
-            },
-            body: JSON.stringify({
-              memberKey: "member1",
-              amount: Number(monthlyIncome),
-              type: "income",
-              category: "Income",
-              date: new Date().toISOString().slice(0, 10),
-              notes: "Initial monthly income",
-            }),
-          })
-        } catch {
-          // ignore initial income failure
-        }
-      }
-
+    if (email && password && name && monthlyIncome) {
       setIsAuthenticated(true)
-      toast({ title: "Account created", description: "We set an initial income entry for you." })
-    } catch (err) {
-      toast({ title: "Signup failed", description: "Please try again.", variant: "destructive" as any })
     }
   }
 
@@ -321,27 +226,7 @@ export default function HomePage() {
   }
 
   if (isAuthenticated) {
-    return (
-      <FinanceDashboard
-        userIncome={Number(monthlyIncome) || 0}
-        userLoan={Number(currentLoan) || 0}
-        members={members}
-        token={token}
-        apiBase={API_BASE}
-        toast={toast}
-        onLogout={() => {
-          setIsAuthenticated(false)
-          setToken(null)
-          setMembers([])
-          // Clear localStorage on logout
-          localStorage.removeItem('authToken')
-          localStorage.removeItem('authMembers')
-          localStorage.removeItem('activeTab')
-          localStorage.removeItem('currentMember')
-          localStorage.removeItem('viewMode')
-        }}
-      />
-    )
+    return <FinanceDashboard userIncome={Number(monthlyIncome) || 0} userLoan={Number(currentLoan) || 0} />
   }
 
   return (
@@ -367,6 +252,17 @@ export default function HomePage() {
               <CardContent>
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
+                    <Label htmlFor="login-username">Username</Label>
+                    <Input
+                      id="login-username"
+                      type="text"
+                      placeholder="Enter your username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
                     <Input
                       id="email"
@@ -388,6 +284,7 @@ export default function HomePage() {
                       required
                     />
                   </div>
+                  {authError && <p className="text-red-600 text-sm">{authError}</p>}
                   <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">
                     Login
                   </Button>
@@ -404,6 +301,17 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleSignup} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-username">Username</Label>
+                    <Input
+                      id="signup-username"
+                      type="text"
+                      placeholder="Choose a username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                    />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="name">Primary Member Name</Label>
                     <Input
@@ -458,6 +366,7 @@ export default function HomePage() {
                       onChange={(e) => setCurrentLoan(e.target.value)}
                     />
                   </div>
+                  {authError && <p className="text-red-600 text-sm">{authError}</p>}
                   <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">
                     Create Account
                   </Button>
@@ -558,45 +467,8 @@ function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
   )
 }
 
-function FinanceDashboard({
-  userIncome,
-  userLoan,
-  members,
-  token,
-  apiBase,
-  onLogout,
-  toast,
-}: {
-  userIncome: number
-  userLoan: number
-  members: Array<{ id: string; name: string }>
-  token: string | null
-  apiBase: string
-  onLogout: () => void
-  toast: any
-}) {
-  const [activeTab, setActiveTab] = useState<
-    | "dashboard"
-    | "transactions"
-    | "budgets"
-    | "goals"
-    | "insights"
-    | "profile"
-    | "account"
-  >("dashboard")
-
-  // Persist activeTab to localStorage
-  useEffect(() => {
-    const savedTab = localStorage.getItem('activeTab')
-    if (savedTab && ['dashboard', 'transactions', 'budgets', 'goals', 'insights', 'profile', 'account'].includes(savedTab)) {
-      setActiveTab(savedTab as any)
-    }
-  }, [])
-
-  // Save activeTab to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem('activeTab', activeTab)
-  }, [activeTab])
+function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLoan: number }) {
+  const [activeTab, setActiveTab] = useState("dashboard")
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(
@@ -659,20 +531,13 @@ function FinanceDashboard({
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null)
 
   useEffect(() => {
-    const fetchQuote = async () => {
-      try {
-        const response = await fetch("https://api.quotable.io/random?tags=motivational,success,money")
-        const data = await response.json()
-        setDailyQuote({ text: data.content, author: data.author })
-      } catch (error) {
-        // Fallback quote if API fails
-        setDailyQuote({
-          text: "The real measure of your wealth is how much you'd be worth if you lost all your money.",
-          author: "Benjamin Franklin",
-        })
-      }
-    }
-    fetchQuote()
+    const localQuotes = [
+      { text: "Budgeting is telling your money where to go instead of wondering where it went.", author: "Dave Ramsey" },
+      { text: "Do not save what is left after spending; instead spend what is left after saving.", author: "Warren Buffett" },
+      { text: "A budget is more than just a series of numbers on a page; it is an embodiment of our values.", author: "Barack Obama" },
+    ]
+    const pick = localQuotes[Math.floor(Math.random() * localQuotes.length)]
+    setDailyQuote(pick)
   }, [])
 
   // Load user profile (user + account members)
@@ -814,6 +679,7 @@ function FinanceDashboard({
   const [goalCategory, setGoalCategory] = useState("")
 
   const [isListening, setIsListening] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState("")
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const [profile, setProfile] = useState<any>(null)
   const [newUsername, setNewUsername] = useState("")
@@ -869,6 +735,7 @@ function FinanceDashboard({
 
       recognitionInstance.onresult = (event) => {
         const transcript = event.results[0][0].transcript.toLowerCase()
+        setVoiceTranscript(transcript)
         parseVoiceInput(transcript)
       }
 
@@ -895,7 +762,9 @@ function FinanceDashboard({
       transcript.includes("income") ||
       transcript.includes("earned") ||
       transcript.includes("received") ||
-      transcript.includes("salary")
+      transcript.includes("salary") ||
+      transcript.includes("credit") ||
+      transcript.includes("deposit")
     ) {
       setFormType("income")
     } else {
@@ -938,6 +807,9 @@ function FinanceDashboard({
       const today = new Date().toISOString().split("T")[0]
       setFormDate(today)
     }
+
+    // Open dialog to confirm adding
+    setShowTransactionForm(true)
   }
 
   const handleVoiceInput = () => {
@@ -949,7 +821,21 @@ function FinanceDashboard({
     if (isListening) {
       recognitionRef.current.stop()
     } else {
+      setShowTransactionForm(true)
       recognitionRef.current.start()
+    }
+  }
+
+  const handleLogout = () => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("token")
+      }
+      fetch("http://localhost:4000/auth/logout", { method: "POST", credentials: "include" }).catch(() => {})
+    } finally {
+      if (typeof window !== "undefined") {
+        window.location.href = "/"
+      }
     }
   }
 
@@ -984,184 +870,112 @@ function FinanceDashboard({
     handleVoiceInput()
   }
 
-  // Map backend OCR category keywords to UI category values
-  const mapOCRCategory = (raw: string | undefined): string => {
-    if (!raw) return "Other"
-    const v = raw.toLowerCase()
-    if (v.includes("food") || v.includes("dining") || v.includes("grocery")) return "Food & Dining"
-    if (v.includes("transport")) return "Transportation"
-    if (v.includes("entertainment") || v.includes("movie") || v.includes("cinema")) return "Entertainment"
-    if (v.includes("shopping") || v.includes("store") || v.includes("amazon") || v.includes("flipkart")) return "Shopping"
-    if (v.includes("utility") || v.includes("electricity") || v.includes("water") || v.includes("internet") || v.includes("phone")) return "Utilities"
-    if (v.includes("health")) return "Healthcare"
-    if (v.includes("income")) return "Income"
-    return "Other"
-  }
+  const handleExport = (format: "csv" | "pdf") => {
+    const data = transactions.map((t) => ({
+      Date: t.date,
+      Description: t.description,
+      Category: t.category,
+      Type: t.type,
+      Amount: t.amount,
+      Notes: t.notes || "",
+      "Split With": t.splitWith?.join(", ") || "",
+    }))
 
-  const triggerReceiptScan = () => {
-    if (receiptInputRef.current) receiptInputRef.current.click()
-  }
+    if (format === "csv") {
+      const csv = [Object.keys(data[0]).join(","), ...data.map((row) => Object.values(row).join(","))].join("\n")
 
-  const handleReceiptSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!token) {
-      toast({ title: "Login required", description: "Please log in to scan receipts.", variant: "destructive" as any })
-      return
+      const blob = new Blob([csv], { type: "text/csv" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "transactions.csv"
+      a.click()
     }
-    try {
-      setIsScanning(true)
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await fetch(`${apiBase}/receipts/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      })
-      if (!res.ok) throw new Error('Failed to scan receipt')
-      const data = await res.json()
-      const t = data.transaction as { description?: string; category?: string; type?: 'income'|'expense'; amount?: number; date?: string }
-      if (t) {
-        setFormDescription(t.description || '')
-        setFormAmount((t.amount ?? 0).toString())
-        setFormType(t.type || 'expense')
-        setFormCategory(mapOCRCategory(t.category))
-        setFormDate((t.date || new Date().toISOString().slice(0,10)))
-        setIsAddDialogOpen(true)
-        setShowTransactionForm(true)
-        toast({ title: 'Receipt scanned', description: 'We prefilled the transaction form. Please review and save.' })
-      }
-    } catch (err) {
-      toast({ title: 'Scan failed', description: 'Could not extract details from the receipt.', variant: 'destructive' as any })
-    } finally {
-      setIsScanning(false)
-      if (receiptInputRef.current) receiptInputRef.current.value = ''
+    setIsExportDialogOpen(false)
+  }
+
+  const addFamilyMember = () => {
+    if (!memberName || !memberEmail) return
+
+    const newMember: FamilyMember = {
+      id: Date.now().toString(),
+      name: memberName,
+      email: memberEmail,
+      role: "secondary",
+    }
+
+    setFamilyMembers([...familyMembers, newMember])
+    setMemberName("")
+    setMemberEmail("")
+    setIsAddMemberDialogOpen(false)
+  }
+
+  const removeFamilyMember = (memberId: string) => {
+    if (familyMembers.find((m) => m.id === memberId)?.role === "primary") return
+    setFamilyMembers(familyMembers.filter((m) => m.id !== memberId))
+    if (currentMember === memberId) {
+      setCurrentMember("1")
     }
   }
 
-  // Derived: transactions scoped by view
-  const scopedTransactions = viewMode === "family"
-    ? transactions
-    : transactions.filter((t) => {
-        // Include transactions where the member is the primary owner
-        if (t.memberId === currentMember) return true
-        
-        // Include split transactions where the current member is in the splitWith list
-        if (t.splitWith && t.splitWith.includes(familyMembers.find(m => m.id === currentMember)?.name || "")) return true
-        
-        // Include split transactions where the member name matches (for temporary split IDs)
-        if (t.memberId && t.memberId.startsWith("split_") && t.memberName === familyMembers.find(m => m.id === currentMember)?.name) return true
-        
-        return false
-      })
+  const handleAddTransaction = () => {
+    if (!formDescription || !formAmount || !formCategory || !formDate) return
 
-  // Derived: filtered transactions for UI list
-  const filteredTransactions = scopedTransactions.filter((t) => {
-    const byCategory = filterCategory === "all" || t.category === filterCategory
-    const byType = filterType === "all" || t.type === filterType
-    return byCategory && byType
-  })
-
-  // Derived: totals
-  const totalIncome = scopedTransactions
-    .filter((t) => t.type === "income")
-    .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0)
-
-  const totalExpenses = scopedTransactions
-    .filter((t) => t.type === "expense")
-    .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0)
-
-  // Derived: monthly trend for last 6 months
-  const monthlyData = (() => {
-    const now = new Date()
-    const months: { month: string; income: number; expenses: number; savings: number }[] = []
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-      const label = d.toLocaleString(undefined, { month: "short" })
-      const inMonth = scopedTransactions.filter((t) => new Date(t.date).getFullYear() === d.getFullYear() && new Date(t.date).getMonth() === d.getMonth())
-      const inc = inMonth.filter((t) => t.type === "income").reduce((s, t) => s + Math.abs(Number(t.amount || 0)), 0)
-      const exp = inMonth.filter((t) => t.type === "expense").reduce((s, t) => s + Math.abs(Number(t.amount || 0)), 0)
-      months.push({ month: label, income: inc, expenses: exp, savings: Math.max(inc - exp, 0) })
+    const currentMemberData = familyMembers.find((m) => m.id === currentMember)
+    const newTransaction: Transaction = {
+      id: Date.now().toString(),
+      description: formDescription,
+      amount:
+        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
+      category: formCategory,
+      type: formType,
+      date: formDate,
+      notes: formNotes || undefined,
+      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
+      memberId: currentMember,
+      memberName: currentMemberData?.name || "Unknown",
     }
-    return months
-  })()
 
-  // Derived: weekly spending (last 7 days with data)
-  const weeklySpending = (() => {
-    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    const values = new Array(7).fill(0)
-    
-    // Get all expense transactions
-    const expenseTransactions = scopedTransactions.filter(t => t.type === "expense")
-    
-    console.log('Weekly spending calculation:', {
-      totalTransactions: scopedTransactions.length,
-      expenseTransactions: expenseTransactions.length,
-      transactions: expenseTransactions.map(t => ({
-        description: t.description,
-        amount: t.amount,
-        date: t.date,
-        category: t.category
-      }))
-    })
-    
-    // If we have expense transactions, show the last 7 days of data
-    if (expenseTransactions.length > 0) {
-      const now = new Date()
-      
-      // Calculate the last 7 days
-      for (let i = 6; i >= 0; i--) {
-        const dayDate = new Date(now)
-        dayDate.setDate(now.getDate() - i)
-        const dayOfWeek = dayDate.getDay()
-        
-        // Find expenses for this specific day
-        const dayExpenses = expenseTransactions.filter(t => {
-          const transactionDate = new Date(t.date)
-          return transactionDate.toDateString() === dayDate.toDateString()
-        })
-        
-        const dayTotal = dayExpenses.reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0)
-        values[dayOfWeek] = dayTotal
-        
-        if (dayTotal > 0) {
-          console.log(`${labels[dayOfWeek]} (${dayDate.toISOString().slice(0, 10)}): $${dayTotal}`)
-        }
-      }
-    }
-    
-    const result = labels.map((label, idx) => ({ day: label, amount: values[idx] }))
-    console.log('Weekly spending result:', result)
-    return result
-  })()
-
-  // Derived: expense categories pie
-  const expenseCategories = (() => {
-    const map = new Map<string, number>()
-    scopedTransactions.forEach((t) => {
-      if (t.type !== "expense") return
-      map.set(t.category, (map.get(t.category) || 0) + Math.abs(Number(t.amount || 0)))
-    })
-    const palette = ["#10b981", "#ef4444", "#3b82f6", "#f59e0b", "#8b5cf6", "#06b6d4", "#84cc16", "#e11d48"]
-    return Array.from(map.entries()).map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }))
-  })()
-
-  // Helpers
-  function getBudgetStatus(b: Budget) {
-    const percentage = b.limit > 0 ? (b.spent / b.limit) * 100 : 0
-    if (percentage >= 100) return { color: "text-red-600" }
-    if (percentage >= 80) return { color: "text-yellow-600" }
-    return { color: "text-emerald-600" }
+    setTransactions([newTransaction, ...transactions])
+    resetForm()
+    setIsAddDialogOpen(false)
   }
 
-  // Budgets filter helper (extend later if needed)
-  function getFilteredBudgets(): Budget[] {
-    // For now, budgets are global; in future this can filter by member/view
-    return updatedBudgets
+  const handleEditTransaction = () => {
+    if (!editingTransaction || !formDescription || !formAmount || !formCategory || !formDate) return
+
+    const updatedTransaction: Transaction = {
+      ...editingTransaction,
+      description: formDescription,
+      amount:
+        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
+      category: formCategory,
+      type: formType,
+      date: formDate,
+      notes: formNotes || undefined,
+      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
+    }
+
+    setTransactions(transactions.map((t) => (t.id === editingTransaction.id ? updatedTransaction : t)))
+    resetForm()
+    setEditingTransaction(null)
   }
 
-  // Transaction form helpers
+  const handleDeleteTransaction = (id: string) => {
+    setTransactions(transactions.filter((t) => t.id !== id))
+  }
+
+  const startEdit = (transaction: Transaction) => {
+    setEditingTransaction(transaction)
+    setFormDescription(transaction.description)
+    setFormAmount(Math.abs(transaction.amount).toString())
+    setFormCategory(transaction.category)
+    setFormType(transaction.type)
+    setFormDate(transaction.date)
+    setFormNotes(transaction.notes || "")
+    setFormSplitWith(transaction.splitWith?.join(", ") || "")
+  }
+
   const resetForm = () => {
     setFormDescription("")
     setFormAmount("")
@@ -1490,47 +1304,29 @@ function FinanceDashboard({
     }
   }
 
-  const addFamilyMember = async () => {
-    if (!memberName || !memberName.trim()) return
-    const hasMember2 = familyMembers.some((m) => m.id === "member2")
-    if (hasMember2) return
-    
-    try {
-      const m1Name = familyMembers.find((m) => m.id === "member1")?.name || familyMembers[0]?.name || "Member 1"
-      const requestBody = { 
-        members: [ 
-          { key: "member1", name: m1Name }, 
-          { key: "member2", name: memberName.trim() } 
-        ] 
-      }
-      
-      console.log('Adding member with request:', requestBody)
-      
-      const res = await fetch(`${apiBase}/auth/members`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(requestBody)
-      })
-      
-      if (res.ok) {
-        const result = await res.json()
-        console.log('Add member response:', result)
-        
-        // Refresh user data to get updated members
-        const me = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-        if (me.ok) {
-          const data = await me.json()
-          const apiMembers: Array<{ key: "member1" | "member2"; name: string }> = data.account?.members || []
-          const mapped = apiMembers.map((m) => ({ id: m.key, name: m.name, email: "", role: m.key === "member1" ? "primary" : "secondary" }))
-          setFamilyMembers(mapped as any)
-          setProfile(data)
-          setCurrentMember("member2")
-          toast({ title: "Success", description: `${memberName.trim()} has been added as a family member!` })
-        }
-      } else {
-        const errorData = await res.json()
-        console.error('Add member failed:', errorData)
-        toast({ title: "Error", description: errorData.message || "Failed to add family member", variant: "destructive" as any })
+  const filteredTransactions = getFilteredTransactions()
+  const totalIncome = filteredTransactions.filter((t) => t.amount > 0).reduce((sum, t) => sum + t.amount, 0)
+  const totalExpenses = Math.abs(filteredTransactions.filter((t) => t.amount < 0).reduce((sum, t) => sum + t.amount, 0))
+
+  const currentBalance = totalIncome - totalExpenses
+
+  const monthlyData = [
+    { month: "Jan", income: 0, expenses: 0, savings: 0 },
+    { month: "Feb", income: 0, expenses: 0, savings: 0 },
+    { month: "Mar", income: 0, expenses: 0, savings: 0 },
+    { month: "Apr", income: 0, expenses: 0, savings: 0 },
+    { month: "May", income: 0, expenses: 0, savings: 0 },
+    { month: "Jun", income: totalIncome, expenses: totalExpenses, savings: currentBalance },
+  ]
+
+  const expenseCategories = categories
+    .filter((category) => category !== "Income" && category !== "Investment")
+    .map((category) => {
+      const spent = calculateSpentAmount(category)
+      return {
+        name: category,
+        value: spent,
+        color: getColorForCategory(category),
       }
     } catch (error) {
       console.error('Add member error:', error)
@@ -1613,86 +1409,12 @@ function FinanceDashboard({
                 <UserPlus className="h-4 w-4 mr-1" />
                 Add Member
               </Button>
-              <ThemeToggle />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" aria-label="Settings">
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setActiveTab("profile")}>Profile</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("account")}>Account Details</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={onLogout}>Logout</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {/* Add Member Dialog */}
-              <Dialog open={isAddMemberDialogOpen} onOpenChange={setIsAddMemberDialogOpen}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add Family Member</DialogTitle>
-                    <DialogDescription>Enter the name for the additional family member.</DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-3">
-                    <div>
-                      <Label htmlFor="new-member-name">Member Name</Label>
-                      <Input
-                        id="new-member-name"
-                        placeholder="e.g., Alex"
-                        value={memberName}
-                        onChange={(e) => setMemberName(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => { setIsAddMemberDialogOpen(false); setMemberName("") }}>Cancel</Button>
-                    <Button
-                      onClick={async () => {
-                        const name = memberName.trim()
-                        if (!name) return
-                        setSaving(true); setMessage(null)
-                        try {
-                          const res = await fetch(`${apiBase}/auth/members`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify({ members: [ { key: 'member1', name: member1Edit || familyMembers[0]?.name || 'Member 1' }, { key: 'member2', name } ] })
-                          })
-                          if (res.ok) {
-                            setMessage('Member added')
-                            const me = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-                            if (me.ok) {
-                              const data = await me.json()
-                              setProfile(data)
-                              const apiMembers: Array<{ key: 'member1' | 'member2'; name: string }> = data?.account?.members || []
-                              const mapped = apiMembers
-                                .filter((m: any) => m.key === 'member1' || (m.key === 'member2' && m.name && m.name.trim() && m.name.trim() !== 'Member 2'))
-                                .map((m: any) => ({ id: m.key, name: m.name }))
-                              setFamilyMembers(
-                                mapped.length
-                                  ? mapped.map((m, idx) => ({ id: m.id, name: m.name, email: '', role: idx === 0 ? 'primary' : 'secondary' }))
-                                  : [{ id: 'member1', name: member1Edit || 'Member 1', email: '', role: 'primary' }]
-                              )
-                              const m1 = apiMembers.find((m: any) => m.key === 'member1')
-                              const m2 = apiMembers.find((m: any) => m.key === 'member2')
-                              setMember1Edit(m1?.name || '')
-                              setMember2Edit(m2?.name || '')
-                              if (m2?.name) setCurrentMember('member2')
-                            }
-                            setIsAddMemberDialogOpen(false)
-                            setMemberName("")
-                          } else {
-                            setMessage('Failed to add member')
-                          }
-                        } finally {
-                          setSaving(false)
-                        }
-                      }}
-                      disabled={saving}
-                    >Save</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <Button variant="outline" size="sm">
+                <Bell className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="sm">
+                <Settings className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>
@@ -1871,12 +1593,7 @@ function FinanceDashboard({
                           ))}
                         </Pie>
                         <Tooltip formatter={(value) => [`$${value}`, "Spent"]} />
-                        <Legend
-                          formatter={(value: any, entry: any) => {
-                            const v = entry && entry.payload && typeof entry.payload.value === 'number' ? entry.payload.value : 0
-                            return `${value}: $${v}`
-                          }}
-                        />
+                        <Legend formatter={(value, entry) => `${value}: $${entry.payload.value}`} />
                       </RechartsPieChart>
                     </ResponsiveContainer>
                   )}
