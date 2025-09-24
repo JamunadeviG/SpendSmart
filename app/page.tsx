@@ -68,6 +68,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import {
   DollarSign,
   TrendingUp,
@@ -157,26 +158,93 @@ interface AIInsight {
 }
 
 export default function HomePage() {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
+  // Restore auth on refresh: if token exists, fetch profile and stay on dashboard
+  useEffect(() => {
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      if (token) {
+        setShowLanding(false)
+        setIsAuthenticated(true)
+        fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then(async (r) => (await r.json()))
+          .then((me) => {
+            if (me && typeof me.monthlyIncome === 'number') {
+              setProfileIncome(Number(me.monthlyIncome) || 0)
+            }
+          })
+          .catch(() => {
+            // invalid/expired token → clear and go to landing
+            localStorage.removeItem('token')
+            setIsAuthenticated(false)
+            setShowLanding(true)
+          })
+      }
+    } catch {
+      // ignore
+    }
+  }, [API_BASE])
   const [showLanding, setShowLanding] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [name, setName] = useState("")
   const [monthlyIncome, setMonthlyIncome] = useState("")
+  const [profileIncome, setProfileIncome] = useState<number>(0)
   const [currentLoan, setCurrentLoan] = useState("")
+  const [authError, setAuthError] = useState<string>("")
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Mock authentication - in real app, this would validate credentials
-    if (email && password) {
+    setAuthError("")
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(async () => ({ message: await res.text() }))
+        throw new Error(body?.message || "Login failed")
+      }
+      const data = await res.json()
+      localStorage.setItem("token", data.token)
+      if (data?.user?.monthlyIncome != null) {
+        setProfileIncome(Number(data.user.monthlyIncome) || 0)
+      }
       setIsAuthenticated(true)
+    } catch (err: any) {
+      setAuthError(err?.message || "Invalid username or password")
     }
   }
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (email && password && name && monthlyIncome) {
-      setIsAuthenticated(true)
+    setAuthError("")
+    try {
+    const payload: any = {
+        username,
+        name,
+        email,
+        password,
+        income: { amount: Number(monthlyIncome), source: "Monthly Income" },
+      }
+      const res = await fetch(`${API_BASE}/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(async () => ({ message: await res.text() }))
+        throw new Error(body?.message || "Signup failed")
+      }
+      // After signup, auto-login
+      await handleLogin(new Event("submit") as any)
+    } catch (err: any) {
+      setAuthError(err?.message || "Signup failed. Username or email may already be in use.")
     }
   }
 
@@ -185,7 +253,7 @@ export default function HomePage() {
   }
 
   if (isAuthenticated) {
-    return <FinanceDashboard userIncome={Number(monthlyIncome) || 0} userLoan={Number(currentLoan) || 0} />
+    return <FinanceDashboard userIncome={profileIncome || 0} userLoan={Number(currentLoan) || 0} />
   }
 
   return (
@@ -211,6 +279,17 @@ export default function HomePage() {
               <CardContent>
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
+                    <Label htmlFor="login-username">Username</Label>
+                    <Input
+                      id="login-username"
+                      type="text"
+                      placeholder="Enter your username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
                     <Input
                       id="email"
@@ -232,6 +311,7 @@ export default function HomePage() {
                       required
                     />
                   </div>
+                  {authError && <p className="text-red-600 text-sm">{authError}</p>}
                   <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">
                     Login
                   </Button>
@@ -248,6 +328,17 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleSignup} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-username">Username</Label>
+                    <Input
+                      id="signup-username"
+                      type="text"
+                      placeholder="Choose a username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                    />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
                     <Input
@@ -302,6 +393,7 @@ export default function HomePage() {
                       onChange={(e) => setCurrentLoan(e.target.value)}
                     />
                   </div>
+                  {authError && <p className="text-red-600 text-sm">{authError}</p>}
                   <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">
                     Create Account
                   </Button>
@@ -403,6 +495,7 @@ function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
 }
 
 function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLoan: number }) {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
   const [activeTab, setActiveTab] = useState("dashboard")
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
@@ -439,20 +532,13 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null)
 
   useEffect(() => {
-    const fetchQuote = async () => {
-      try {
-        const response = await fetch("https://api.quotable.io/random?tags=motivational,success,money")
-        const data = await response.json()
-        setDailyQuote({ text: data.content, author: data.author })
-      } catch (error) {
-        // Fallback quote if API fails
-        setDailyQuote({
-          text: "The real measure of your wealth is how much you'd be worth if you lost all your money.",
-          author: "Benjamin Franklin",
-        })
-      }
-    }
-    fetchQuote()
+    const localQuotes = [
+      { text: "Budgeting is telling your money where to go instead of wondering where it went.", author: "Dave Ramsey" },
+      { text: "Do not save what is left after spending; instead spend what is left after saving.", author: "Warren Buffett" },
+      { text: "A budget is more than just a series of numbers on a page; it is an embodiment of our values.", author: "Barack Obama" },
+    ]
+    const pick = localQuotes[Math.floor(Math.random() * localQuotes.length)]
+    setDailyQuote(pick)
   }, [])
 
   const [filterCategory, setFilterCategory] = useState("all")
@@ -490,6 +576,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
   const [goalCategory, setGoalCategory] = useState("")
 
   const [isListening, setIsListening] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState("")
   const recognitionRef = useRef<SpeechRecognition | null>(null)
 
   useEffect(() => {
@@ -511,6 +598,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
 
       recognitionInstance.onresult = (event) => {
         const transcript = event.results[0][0].transcript.toLowerCase()
+        setVoiceTranscript(transcript)
         parseVoiceInput(transcript)
       }
 
@@ -537,7 +625,9 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       transcript.includes("income") ||
       transcript.includes("earned") ||
       transcript.includes("received") ||
-      transcript.includes("salary")
+      transcript.includes("salary") ||
+      transcript.includes("credit") ||
+      transcript.includes("deposit")
     ) {
       setFormType("income")
     } else {
@@ -580,6 +670,9 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       const today = new Date().toISOString().split("T")[0]
       setFormDate(today)
     }
+
+    // Open dialog to confirm adding
+    setShowTransactionForm(true)
   }
 
   const handleVoiceInput = () => {
@@ -591,7 +684,21 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     if (isListening) {
       recognitionRef.current.stop()
     } else {
+      setShowTransactionForm(true)
       recognitionRef.current.start()
+    }
+  }
+
+  const handleLogout = () => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("token")
+      }
+      fetch("http://localhost:4000/auth/logout", { method: "POST", credentials: "include" }).catch(() => {})
+    } finally {
+      if (typeof window !== "undefined") {
+        window.location.href = "/"
+      }
     }
   }
 
@@ -670,25 +777,75 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     }
   }
 
-  const handleAddTransaction = () => {
+  const handleAddTransaction = async () => {
     if (!formDescription || !formAmount || !formCategory || !formDate) return
 
     const currentMemberData = familyMembers.find((m) => m.id === currentMember)
-    const newTransaction: Transaction = {
-      id: Date.now().toString(),
-      description: formDescription,
-      amount:
-        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
-      category: formCategory,
-      type: formType,
-      date: formDate,
-      notes: formNotes || undefined,
-      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
-      memberId: currentMember,
-      memberName: currentMemberData?.name || "Unknown",
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const res = await fetch(`${API_BASE}/user/transactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          amount: Math.abs(Number.parseFloat(formAmount)),
+          category: formCategory,
+          type: formType,
+          date: formDate,
+          notes: formNotes || undefined,
+        }),
+      })
+      if (res.ok) {
+        const created = await res.json()
+        const newTransaction: Transaction = {
+          id: created._id || Date.now().toString(),
+          description: formDescription,
+          amount:
+            formType === 'expense' ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
+          category: formCategory,
+          type: formType,
+          date: formDate,
+          notes: formNotes || undefined,
+          splitWith: formSplitWith ? formSplitWith.split(',').map((s) => s.trim()) : undefined,
+          memberId: currentMember,
+          memberName: currentMemberData?.name || 'Unknown',
+        }
+        setTransactions([newTransaction, ...transactions])
+      } else {
+        // fallback to local add
+        const newTransaction: Transaction = {
+          id: Date.now().toString(),
+          description: formDescription,
+          amount:
+            formType === 'expense' ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
+          category: formCategory,
+          type: formType,
+          date: formDate,
+          notes: formNotes || undefined,
+          splitWith: formSplitWith ? formSplitWith.split(',').map((s) => s.trim()) : undefined,
+          memberId: currentMember,
+          memberName: currentMemberData?.name || 'Unknown',
+        }
+        setTransactions([newTransaction, ...transactions])
+      }
+    } catch {
+      const newTransaction: Transaction = {
+        id: Date.now().toString(),
+        description: formDescription,
+        amount:
+          formType === 'expense' ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
+        category: formCategory,
+        type: formType,
+        date: formDate,
+        notes: formNotes || undefined,
+        splitWith: formSplitWith ? formSplitWith.split(',').map((s) => s.trim()) : undefined,
+        memberId: currentMember,
+        memberName: currentMemberData?.name || 'Unknown',
+      }
+      setTransactions([newTransaction, ...transactions])
     }
-
-    setTransactions([newTransaction, ...transactions])
     resetForm()
     setIsAddDialogOpen(false)
   }
@@ -832,8 +989,13 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
   }
 
   const filteredTransactions = getFilteredTransactions()
-  const totalIncome = filteredTransactions.filter((t) => t.amount > 0).reduce((sum, t) => sum + t.amount, 0)
-  const totalExpenses = Math.abs(filteredTransactions.filter((t) => t.amount < 0).reduce((sum, t) => sum + t.amount, 0))
+  const totalIncomeFromTransactions = filteredTransactions
+    .filter((t) => t.amount > 0)
+    .reduce((sum, t) => sum + t.amount, 0)
+  const totalIncome = userIncome + totalIncomeFromTransactions
+  const totalExpenses = Math.abs(
+    filteredTransactions.filter((t) => t.amount < 0).reduce((sum, t) => sum + t.amount, 0),
+  )
 
   const currentBalance = totalIncome - totalExpenses
 
@@ -930,9 +1092,18 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               <Button variant="outline" size="sm">
                 <Bell className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm">
-                <Settings className="h-4 w-4" />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Settings</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout}>Logout</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -1111,7 +1282,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                           ))}
                         </RechartsPieChart>
                         <Tooltip formatter={(value) => [`$${value}`, "Spent"]} />
-                        <Legend formatter={(value, entry) => `${value}: $${entry.payload.value}`} />
+                        <Legend formatter={(value, entry: any) => `${value}: $${entry?.payload?.value ?? 0}`} />
                       </RechartsPieChart>
                     </ResponsiveContainer>
                   )}
