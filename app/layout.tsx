@@ -1,16 +1,17 @@
 import type { Metadata } from 'next'
-import { GeistSans } from 'geist/font/sans'
-import { GeistMono } from 'geist/font/mono'
+import { Inter, Lato } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/toaster'
 import { Chatbot } from '@/components/chatbot/chatbot'
 
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+const lato = Lato({ weight: ['300', '400', '700'], subsets: ['latin'], variable: '--font-lato', display: 'swap' })
+
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.app',
+  title: 'SpendSmart',
+  description: 'Financial Freedom Tracker',
 }
 
 export default function RootLayout({
@@ -20,8 +21,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <body className={`${inter.variable} ${lato.variable} font-sans antialiased`}>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           {children}
           <Analytics />
           <Toaster />

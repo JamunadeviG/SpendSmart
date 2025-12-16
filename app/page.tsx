@@ -1,6 +1,6 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 
 declare global {
   interface Window {
@@ -50,6 +50,7 @@ declare var SpeechRecognition: {
 }
 
 import { useState, useEffect, useRef } from "react"
+import { cn } from "@/lib/utils"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
@@ -377,6 +378,8 @@ export default function HomePage() {
           </TabsContent>
         </Tabs>
       </div>
+
+
     </div>
   )
 }
@@ -468,7 +471,74 @@ function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
   )
 }
 
+const CountUp = ({ value, duration = 1000, prefix = "" }: { value: number; duration?: number; prefix?: string }) => {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    let startTime: number | null = null
+    const animation = (currentTime: number) => {
+      if (startTime === null) startTime = currentTime
+      const progress = Math.min((currentTime - startTime) / duration, 1)
+
+      // Easing function for smooth stop (easeOutQuart)
+      const ease = 1 - Math.pow(1 - progress, 4)
+
+      setCount(ease * value)
+
+      if (progress < 1) {
+        requestAnimationFrame(animation)
+      }
+    }
+    requestAnimationFrame(animation)
+  }, [value, duration])
+
+  return <span>{prefix}{count.toFixed(2)}</span>
+}
+
+const FloatingLabelInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { label: string }>(
+  ({ className, label, id, ...props }, ref) => {
+    return (
+      <div className="input-group relative">
+        <input
+          className={cn(
+            "flex h-12 w-full rounded-xl bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-transparent focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 pt-4 peer",
+            className
+          )}
+          ref={ref}
+          placeholder={label} // Required for :placeholder-shown to work
+          id={id}
+          {...props}
+        />
+        <label
+          htmlFor={id}
+          className="absolute left-3 top-1 text-[10px] text-muted-foreground transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-sm peer-placeholder-shown:text-muted-foreground/70 peer-focus:top-1 peer-focus:text-[10px] peer-focus:text-primary pointer-events-none"
+        >
+          {label}
+        </label>
+      </div>
+    )
+  }
+)
+FloatingLabelInput.displayName = "FloatingLabelInput"
+
+const Skeleton = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => {
+  return (
+    <div
+      className={cn("animate-pulse rounded-md bg-white/10 dark:bg-white/5", className)}
+      {...props}
+    />
+  )
+}
+
 function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLoan: number }) {
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    // Simulate initial data loading for premium feel
+    const timer = setTimeout(() => setIsLoading(false), 2000)
+    return () => clearTimeout(timer)
+  }, [])
+
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
 
   /* Defining missing variables and helpers */
@@ -932,6 +1002,8 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     // Open dialog to confirm adding
     setShowTransactionForm(true)
   }
+
+
 
   const handleVoiceInput = () => {
     if (!recognitionRef.current) {
@@ -1398,7 +1470,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-900 shadow-sm border-b dark:border-gray-800">
+      <header className="bg-white/5 backdrop-blur-md border-b border-white/10 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             {/* Header left section: logo + member selector + view toggle */}
@@ -1455,7 +1527,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
         </div>
       </header>
 
-      <nav className="bg-white dark:bg-gray-900 border-b dark:border-gray-800">
+      <nav className="border-b border-white/5 bg-transparent">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-8">
             <div className="flex items-center space-x-2 py-4">
@@ -1495,61 +1567,71 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Income</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">${totalIncome.toFixed(2)}</div>
-                  <p className="text-xs text-muted-foreground">
-                    {viewMode === "family" ? "Combined family income" : "Your income"}
+            {/* Hero Section */}
+            {isLoading ? (
+              <div className="py-10 mb-12 space-y-8">
+                <div className="flex justify-center">
+                  <Skeleton className="h-8 w-32 rounded-full" />
+                </div>
+                <div className="flex justify-center">
+                  <Skeleton className="h-32 w-64 rounded-xl" />
+                </div>
+                <div className="flex justify-center gap-24">
+                  <Skeleton className="h-20 w-32 rounded-lg" />
+                  <Skeleton className="h-20 w-32 rounded-lg" />
+                </div>
+              </div>
+            ) : (
+              <div className="relative py-10 mb-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <div className="text-center space-y-4 mb-10">
+                  <p className="text-emerald-100/80 font-display text-lg mb-2">
+                    {(() => {
+                      const hour = new Date().getHours()
+                      const name = (familyMembers.find((m) => m.id === currentMember)?.name) || "friend"
+                      if (hour < 12) return `Good morning, ${name}. You're doing well today 🌱`
+                      if (hour < 18) return `Good afternoon, ${name}. Keep up the momentum ☀️`
+                      return `Good evening, ${name}. Time to relax and reflect 🌙`
+                    })()}
                   </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-                  <TrendingDown className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-red-600">${totalExpenses.toFixed(2)}</div>
-                  <p className="text-xs text-muted-foreground">
-                    {viewMode === "family" ? "Combined family expenses" : "Your expenses"}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Net Balance</CardTitle>
-                  <Wallet className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div
-                    className={`text-2xl font-bold ${totalIncome - totalExpenses >= 0 ? "text-green-600" : "text-red-600"}`}
-                  >
-                    ${(totalIncome - totalExpenses).toFixed(2)}
+                  <div className="inline-flex items-center justify-center px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 shadow-lg mb-4">
+                    <span className="text-xs font-display font-bold text-emerald-100 tracking-widest uppercase">
+                      {viewMode === "family" ? "Family Balance" : "Net Balance"}
+                    </span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {viewMode === "family" ? "Family net balance" : "Your net balance"}
-                  </p>
-                </CardContent>
-              </Card>
+                  <h1 className="hero-number text-6xl md:text-8xl drop-shadow-2xl">
+                    <CountUp value={totalIncome - totalExpenses} duration={1500} prefix="$" />
+                  </h1>
+                </div>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Budgets</CardTitle>
-                  <Target className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{budgets.length}</div>
-                  <p className="text-xs text-muted-foreground">Budget categories</p>
-                </CardContent>
-              </Card>
-            </div>
+                <div className="flex justify-center items-center gap-12 sm:gap-24">
+                  <div className="text-center group cursor-default">
+                    <div className="flex items-center justify-center space-x-2 text-emerald-200/80 mb-2 transition-colors group-hover:text-emerald-200">
+                      <div className="p-1.5 rounded-full bg-emerald-500/20">
+                        <TrendingUp className="h-4 w-4" />
+                      </div>
+                      <span className="text-xs font-display font-bold uppercase tracking-wider">Income</span>
+                    </div>
+                    <p className="font-sans text-3xl font-semibold text-emerald-50 group-hover:scale-105 transition-transform">
+                      <CountUp value={totalIncome} prefix="$" />
+                    </p>
+                  </div>
+
+                  <div className="hidden sm:block w-px h-16 bg-gradient-to-b from-transparent via-white/20 to-transparent"></div>
+
+                  <div className="text-center group cursor-default">
+                    <div className="flex items-center justify-center space-x-2 text-rose-200/80 mb-2 transition-colors group-hover:text-rose-200">
+                      <div className="p-1.5 rounded-full bg-rose-500/20">
+                        <TrendingDown className="h-4 w-4" />
+                      </div>
+                      <span className="text-xs font-display font-bold uppercase tracking-wider">Expenses</span>
+                    </div>
+                    <p className="font-sans text-3xl font-semibold text-rose-50 group-hover:scale-105 transition-transform">
+                      <CountUp value={totalExpenses} prefix="$" />
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
               <Card>
@@ -1559,43 +1641,48 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={monthlyData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
-                      <YAxis stroke="#6b7280" fontSize={12} tickFormatter={(value) => `$${value}`} />
+                    <LineChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.4} />
+                      <XAxis dataKey="month" stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#6b7280" fontSize={12} tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} />
                       <Tooltip
                         formatter={(value, name) => [`$${value}`, name]}
                         labelStyle={{ color: "#374151" }}
                         contentStyle={{
-                          backgroundColor: "white",
-                          border: "1px solid #e5e7eb",
-                          borderRadius: "8px",
+                          backgroundColor: "rgba(255, 255, 255, 0.8)",
+                          backdropFilter: "blur(4px)",
+                          border: "1px solid rgba(255, 255, 255, 0.2)",
+                          borderRadius: "12px",
+                          boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
                         }}
                       />
                       <Legend />
                       <Line
-                        type="monotone"
+                        type="basis"
                         dataKey="income"
                         stroke="#10b981"
                         strokeWidth={3}
                         name="Income"
-                        dot={{ fill: "#10b981", strokeWidth: 2, r: 4 }}
+                        dot={false}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
                       />
                       <Line
-                        type="monotone"
+                        type="basis"
                         dataKey="expenses"
-                        stroke="#ef4444"
+                        stroke="#f43f5e"
                         strokeWidth={3}
                         name="Expenses"
-                        dot={{ fill: "#ef4444", strokeWidth: 2, r: 4 }}
+                        dot={false}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
                       />
                       <Line
-                        type="monotone"
+                        type="basis"
                         dataKey="savings"
                         stroke="#3b82f6"
                         strokeWidth={3}
                         name="Savings"
-                        dot={{ fill: "#3b82f6", strokeWidth: 2, r: 4 }}
+                        dot={false}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -1611,17 +1698,27 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                   {expenseCategories.length === 0 ? (
                     <div className="flex items-center justify-center h-[300px] text-center">
                       <div>
-                        <LucidePieChart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500 dark:text-gray-400">No expenses recorded yet</p>
-                        <p className="text-sm text-gray-400 dark:text-gray-500">
-                          Start adding transactions to see your spending breakdown
+                        <LucidePieChart className="h-16 w-16 text-emerald-100/30 mx-auto mb-4" />
+                        <p className="text-lg font-medium text-muted-foreground mb-1">No expenses yet</p>
+                        <p className="text-sm text-muted-foreground/70">
+                          Your wallet is smiling 😊
                         </p>
                       </div>
                     </div>
                   ) : (
                     <ResponsiveContainer width="100%" height={300}>
                       <RechartsPieChart>
-                        <Pie data={expenseCategories} cx="50%" cy="50%" outerRadius={100} dataKey="value" nameKey="name">
+                        <Pie
+                          data={expenseCategories}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={100}
+                          paddingAngle={5}
+                          dataKey="value"
+                          nameKey="name"
+                          stroke="none"
+                        >
                           {expenseCategories.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
@@ -2459,7 +2556,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               </div>
               <Dialog open={isAddGoalDialogOpen} onOpenChange={setIsAddGoalDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button className="bg-emerald-600 hover:bg-emerald-700">
+                  <Button className="btn-gradient">
                     <Plus className="h-4 w-4 mr-2" />
                     Add Goal
                   </Button>
@@ -2471,35 +2568,32 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                   </DialogHeader>
                   <div className="space-y-4">
                     <div>
-                      <Label htmlFor="goal-name">Goal Name</Label>
-                      <Input
+                      <FloatingLabelInput
                         id="goal-name"
+                        label="Goal Name"
                         value={goalName}
                         onChange={(e) => setGoalName(e.target.value)}
-                        placeholder="e.g., Emergency Fund"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="goal-target">Target Amount</Label>
-                        <Input
+                        <FloatingLabelInput
                           id="goal-target"
+                          label="Target Amount"
                           type="number"
                           step="0.01"
                           value={goalTarget}
                           onChange={(e) => setGoalTarget(e.target.value)}
-                          placeholder="10000.00"
                         />
                       </div>
                       <div>
-                        <Label htmlFor="goal-current">Current Amount</Label>
-                        <Input
+                        <FloatingLabelInput
                           id="goal-current"
+                          label="Current Amount"
                           type="number"
                           step="0.01"
                           value={goalCurrent}
                           onChange={(e) => setGoalCurrent(e.target.value)}
-                          placeholder="0.00"
                         />
                       </div>
                     </div>
@@ -2514,12 +2608,11 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                         />
                       </div>
                       <div>
-                        <Label htmlFor="goal-category">Category</Label>
-                        <Input
+                        <FloatingLabelInput
                           id="goal-category"
+                          label="Category"
                           value={goalCategory}
                           onChange={(e) => setGoalCategory(e.target.value)}
-                          placeholder="e.g., Savings"
                         />
                       </div>
                     </div>
@@ -2540,7 +2633,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
-            </div>
+            </div >
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {goals.map((goal) => {
@@ -2591,80 +2684,83 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                 )
               })}
             </div>
-          </div>
-        )}
+          </div >
+        )
+        }
 
-        {activeTab === "insights" && (
-          <div className="px-4 py-6 sm:px-0">
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">AI Financial Insights</h2>
-              <p className="text-gray-600 dark:text-gray-400">
-                Personalized recommendations to improve your financial health
-              </p>
-            </div>
+        {
+          activeTab === "insights" && (
+            <div className="px-4 py-6 sm:px-0">
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">AI Financial Insights</h2>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Personalized recommendations to improve your financial health
+                </p>
+              </div>
 
-            <div className="space-y-6">
-              {aiInsights.map((insight) => (
-                <Card
-                  key={insight.id}
-                  className={`dark:bg-gray-900 dark:border-gray-800 ${insight.type === "warning"
-                    ? "border-yellow-500/40"
-                    : insight.type === "achievement"
-                      ? "border-emerald-500/40"
-                      : "border-blue-500/40"
-                    }`}
-                >
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        {insight.type === "warning" ? (
-                          <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                        ) : insight.type === "achievement" ? (
-                          <CheckCircle className="h-5 w-5 text-emerald-500" />
-                        ) : (
-                          <Lightbulb className="h-5 w-5 text-blue-500" />
-                        )}
-                        <CardTitle className="text-gray-900 dark:text-white">{insight.title}</CardTitle>
-                      </div>
-                      <Badge
-                        variant={
-                          insight.type === "warning"
-                            ? "destructive"
-                            : insight.type === "suggestion"
-                              ? "default"
-                              : "secondary"
-                        }
-                      >
-                        {insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}
-                      </Badge>
-                    </div>
-                    <CardDescription className="text-gray-700 dark:text-gray-300">{insight.description}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {insight.action && (
-                      <Button
-                        variant={insight.type === "warning" ? "destructive" : "default"}
-                        size="sm"
-                        onClick={() => {
-                          if (insight.action === "Add Transaction") {
-                            setActiveTab("transactions")
-                            setShowTransactionForm(true)
-                          } else if (insight.action === "Create Budget") {
-                            setActiveTab("budgets")
-                            setShowBudgetForm(true)
+              <div className="space-y-6">
+                {aiInsights.map((insight) => (
+                  <Card
+                    key={insight.id}
+                    className={`dark:bg-gray-900 dark:border-gray-800 ${insight.type === "warning"
+                      ? "border-yellow-500/40"
+                      : insight.type === "achievement"
+                        ? "border-emerald-500/40"
+                        : "border-blue-500/40"
+                      }`}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {insight.type === "warning" ? (
+                            <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                          ) : insight.type === "achievement" ? (
+                            <CheckCircle className="h-5 w-5 text-emerald-500" />
+                          ) : (
+                            <Lightbulb className="h-5 w-5 text-blue-500" />
+                          )}
+                          <CardTitle className="text-gray-900 dark:text-white">{insight.title}</CardTitle>
+                        </div>
+                        <Badge
+                          variant={
+                            insight.type === "warning"
+                              ? "destructive"
+                              : insight.type === "suggestion"
+                                ? "default"
+                                : "secondary"
                           }
-                        }}
-                      >
-                        {insight.action}
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+                        >
+                          {insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}
+                        </Badge>
+                      </div>
+                      <CardDescription className="text-gray-700 dark:text-gray-300">{insight.description}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {insight.action && (
+                        <Button
+                          variant={insight.type === "warning" ? "destructive" : "default"}
+                          size="sm"
+                          onClick={() => {
+                            if (insight.action === "Add Transaction") {
+                              setActiveTab("transactions")
+                              setShowTransactionForm(true)
+                            } else if (insight.action === "Create Budget") {
+                              setActiveTab("budgets")
+                              setShowBudgetForm(true)
+                            }
+                          }}
+                        >
+                          {insight.action}
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </main>
+          )
+        }
+      </main >
 
       <Dialog open={isAddMemberDialogOpen} onOpenChange={setIsAddMemberDialogOpen}>
         <DialogContent>
@@ -2676,22 +2772,20 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="member-name">Name</Label>
-              <Input
+              <FloatingLabelInput
                 id="member-name"
+                label="Name"
                 value={memberName}
                 onChange={(e) => setMemberName(e.target.value)}
-                placeholder="Enter member name"
               />
             </div>
             <div>
-              <Label htmlFor="member-email">Email</Label>
-              <Input
+              <FloatingLabelInput
                 id="member-email"
+                label="Email"
                 type="email"
                 value={memberEmail}
                 onChange={(e) => setMemberEmail(e.target.value)}
-                placeholder="Enter member email"
               />
             </div>
           </div>
@@ -2705,6 +2799,6 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       </Dialog>
 
       {/* ... existing code for other dialogs ... */}
-    </div>
+    </div >
   )
 }
