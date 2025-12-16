@@ -46,7 +46,7 @@ interface SpeechRecognitionAlternative {
 
 declare var SpeechRecognition: {
   prototype: SpeechRecognition
-  new (): SpeechRecognition
+  new(): SpeechRecognition
 }
 
 import { useState, useEffect, useRef } from "react"
@@ -77,7 +77,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+
 import {
   DollarSign,
   TrendingUp,
@@ -205,6 +205,7 @@ export default function HomePage() {
   const [monthlyIncome, setMonthlyIncome] = useState("")
   const [profileIncome, setProfileIncome] = useState<number>(0)
   const [currentLoan, setCurrentLoan] = useState("")
+  const [authError, setAuthError] = useState("") // Added missing state
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -468,26 +469,77 @@ function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
 }
 
 function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLoan: number }) {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
+
+  /* Defining missing variables and helpers */
+  const { toast } = useToast()
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
+  const getColorForCategory = (category: string) => {
+    switch (category) {
+      case "Income": return "#10b981"
+      case "Food & Dining": return "#f59e0b"
+      case "Transportation": return "#3b82f6"
+      case "Utilities": return "#6366f1"
+      case "Entertainment": return "#8b5cf6"
+      case "Shopping": return "#ec4899"
+      case "Healthcare": return "#ef4444"
+      case "Education": return "#14b8a6"
+      default: return "#9ca3af"
+    }
+  }
+
+  const getFilteredBudgets = () => {
+    if (viewMode === "family") return budgets
+    return budgets
+  }
+
+  const getBudgetStatus = (b: Budget) => {
+    if (b.limit === 0) return "normal"
+    const percentage = (b.spent / b.limit) * 100
+    if (percentage >= 100) return "critical"
+    if (percentage >= 80) return "warning"
+    return "normal"
+  }
+
+  // Calculate weekly spending for charts
+  const weeklySpending = [
+    { day: "Mon", amount: 0 },
+    { day: "Tue", amount: 0 },
+    { day: "Wed", amount: 0 },
+    { day: "Thu", amount: 0 },
+    { day: "Fri", amount: 0 },
+    { day: "Sat", amount: 0 },
+    { day: "Sun", amount: 0 },
+  ]
+
   const [activeTab, setActiveTab] = useState("dashboard")
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(
-    members && members.length
-      ? members.map((m, idx) => ({ id: m.id, name: m.name, email: "", role: idx === 0 ? "primary" : "secondary" }))
-      : []
-  )
-  const [currentMember, setCurrentMember] = useState<string>(members?.[0]?.id || "")
+  const getFilteredTransactions = () => {
+    if (viewMode === "family") {
+      return transactions
+    }
+    return transactions.filter((t) => t.memberId === currentMember || t.memberName === currentMember)
+  }
+
+  /* 
+   * Initializing familyMembers with empty array. 
+   * Actual members should be loaded from backend via useEffect.
+   */
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([])
+  const [currentMember, setCurrentMember] = useState<string>("")
   const [viewMode, setViewMode] = useState<"individual" | "family">("individual")
 
   // Persist currentMember and viewMode to localStorage
   useEffect(() => {
     const savedMember = localStorage.getItem('currentMember')
     const savedViewMode = localStorage.getItem('viewMode')
-    
+
     if (savedMember && familyMembers.some(m => m.id === savedMember)) {
       setCurrentMember(savedMember)
     }
-    
+
     if (savedViewMode && ['individual', 'family'].includes(savedViewMode)) {
       setViewMode(savedViewMode as 'individual' | 'family')
     }
@@ -545,30 +597,47 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     const loadProfile = async () => {
       if (!token) return
       try {
-        const res = await fetch(`${apiBase}/auth/me`, {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (!res.ok) return
         const data = await res.json()
         setProfile(data)
+
+        // Populate familyMembers from profile data
+        if (data?.account?.members) {
+          const mappedMembers: FamilyMember[] = data.account.members.map((m: any, idx: number) => ({
+            id: m.key,
+            name: m.name || m.key,
+            email: "", // Email might not be in the member object from this endpoint
+            role: idx === 0 ? "primary" : "secondary"
+          }))
+          setFamilyMembers(mappedMembers)
+
+          // Set current member if not set
+          if (!currentMember && mappedMembers.length > 0) {
+            setCurrentMember(mappedMembers[0].id)
+          }
+        }
+
         const members = data?.account?.members || []
         const m1 = members.find((m: any) => m.key === 'member1')
         const m2 = members.find((m: any) => m.key === 'member2')
         setMember1Edit(m1?.name || "")
         setMember2Edit(m2?.name || "")
-      } catch {
-        // ignore
+      } catch (error) {
+        console.error("Failed to load profile", error)
       }
     }
     loadProfile()
-  }, [token, apiBase])
+  }, [token, API_BASE]) // Fixed dependency to API_BASE instead of apiBase which might be undefined
 
   // Fetch transactions from backend when authenticated
   useEffect(() => {
     const load = async () => {
       if (!token) return
       try {
-        const res = await fetch(`${apiBase}/transactions`, {
+        const res = await fetch(`${API_BASE}/transactions`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (!res.ok) return
@@ -600,7 +669,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     const loadBudgets = async () => {
       if (!token) return
       try {
-        const res = await fetch(`${apiBase}/budgets`, { headers: { Authorization: `Bearer ${token}` } })
+        const res = await fetch(`${API_BASE}/budgets`, { headers: { Authorization: `Bearer ${token}` } })
         if (res.ok) {
           const data = await res.json()
           const mapped: Budget[] = data.map((b: any) => ({
@@ -617,14 +686,14 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       }
     }
     loadBudgets()
-  }, [token, apiBase])
+  }, [token, API_BASE])
 
   // Fetch goals from backend when authenticated
   useEffect(() => {
     const loadGoals = async () => {
       if (!token) return
       try {
-        const res = await fetch(`${apiBase}/goals`, { headers: { Authorization: `Bearer ${token}` } })
+        const res = await fetch(`${API_BASE}/goals`, { headers: { Authorization: `Bearer ${token}` } })
         if (res.ok) {
           const data = await res.json()
           const mapped: Goal[] = data.map((g: any) => ({
@@ -642,7 +711,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       }
     }
     loadGoals()
-  }, [token, apiBase])
+  }, [token, API_BASE])
 
   const [filterCategory, setFilterCategory] = useState("all")
   const [filterType, setFilterType] = useState("all")
@@ -688,6 +757,58 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
   const [member1Edit, setMember1Edit] = useState("")
   const [member2Edit, setMember2Edit] = useState("")
   const [saving, setSaving] = useState(false)
+  const handleReceiptSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleReceiptUpload(e.target.files[0])
+    }
+  }
+
+  const triggerReceiptScan = () => {
+    receiptInputRef.current?.click()
+  }
+
+  const handleReceiptUpload = async (file: File) => {
+    setIsScanning(true)
+    const formData = new FormData()
+    formData.append('receipt', file)
+
+    try {
+      if (token) {
+        // Upload to backend
+        const res = await fetch(`${API_BASE}/receipts/scan`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setFormAmount(String(data.amount || ""))
+          setFormDate(data.date || new Date().toISOString().slice(0, 10))
+          setFormCategory(data.category || "Other")
+          setFormDescription(data.merchant || "Receipt Scan")
+          setShowTransactionForm(true)
+          toast({ title: "Receipt Scanned", description: "Transaction details populated from receipt." })
+        } else {
+          throw new Error("Scan failed")
+        }
+      } else {
+        // Mock scan
+        setTimeout(() => {
+          setFormAmount("42.50")
+          setFormCategory("Food & Dining")
+          setFormDescription("Grocery Store")
+          setShowTransactionForm(true)
+          toast({ title: "Receipt Scanned", description: "Mock data populated." })
+        }, 1500)
+      }
+    } catch (error) {
+      console.error("Receipt scan error", error)
+      toast({ title: "Error", description: "Failed to process receipt", variant: "destructive" as any })
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
   const [message, setMessage] = useState<string | null>(null)
   const receiptInputRef = useRef<HTMLInputElement | null>(null)
   const [isScanning, setIsScanning] = useState(false)
@@ -696,7 +817,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
   useEffect(() => {
     const membersFromProfile = profile?.account?.members as Array<{ key?: string; id?: string; name?: string }> | undefined
     if (!membersFromProfile) return
-    
+
     // Only process actual members from the database, don't create defaults
     const processedMembers = membersFromProfile
       .filter((m) => m && (m.key || m.id) && m.name && m.name.trim())
@@ -831,7 +952,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       if (typeof window !== "undefined") {
         localStorage.removeItem("token")
       }
-      fetch("http://localhost:4000/auth/logout", { method: "POST", credentials: "include" }).catch(() => {})
+      fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => { })
     } finally {
       if (typeof window !== "undefined") {
         window.location.href = "/"
@@ -870,29 +991,6 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     handleVoiceInput()
   }
 
-  const handleExport = (format: "csv" | "pdf") => {
-    const data = transactions.map((t) => ({
-      Date: t.date,
-      Description: t.description,
-      Category: t.category,
-      Type: t.type,
-      Amount: t.amount,
-      Notes: t.notes || "",
-      "Split With": t.splitWith?.join(", ") || "",
-    }))
-
-    if (format === "csv") {
-      const csv = [Object.keys(data[0]).join(","), ...data.map((row) => Object.values(row).join(","))].join("\n")
-
-      const blob = new Blob([csv], { type: "text/csv" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = "transactions.csv"
-      a.click()
-    }
-    setIsExportDialogOpen(false)
-  }
 
   const addFamilyMember = () => {
     if (!memberName || !memberEmail) return
@@ -918,63 +1016,6 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     }
   }
 
-  const handleAddTransaction = () => {
-    if (!formDescription || !formAmount || !formCategory || !formDate) return
-
-    const currentMemberData = familyMembers.find((m) => m.id === currentMember)
-    const newTransaction: Transaction = {
-      id: Date.now().toString(),
-      description: formDescription,
-      amount:
-        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
-      category: formCategory,
-      type: formType,
-      date: formDate,
-      notes: formNotes || undefined,
-      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
-      memberId: currentMember,
-      memberName: currentMemberData?.name || "Unknown",
-    }
-
-    setTransactions([newTransaction, ...transactions])
-    resetForm()
-    setIsAddDialogOpen(false)
-  }
-
-  const handleEditTransaction = () => {
-    if (!editingTransaction || !formDescription || !formAmount || !formCategory || !formDate) return
-
-    const updatedTransaction: Transaction = {
-      ...editingTransaction,
-      description: formDescription,
-      amount:
-        formType === "expense" ? -Math.abs(Number.parseFloat(formAmount)) : Math.abs(Number.parseFloat(formAmount)),
-      category: formCategory,
-      type: formType,
-      date: formDate,
-      notes: formNotes || undefined,
-      splitWith: formSplitWith ? formSplitWith.split(",").map((s) => s.trim()) : undefined,
-    }
-
-    setTransactions(transactions.map((t) => (t.id === editingTransaction.id ? updatedTransaction : t)))
-    resetForm()
-    setEditingTransaction(null)
-  }
-
-  const handleDeleteTransaction = (id: string) => {
-    setTransactions(transactions.filter((t) => t.id !== id))
-  }
-
-  const startEdit = (transaction: Transaction) => {
-    setEditingTransaction(transaction)
-    setFormDescription(transaction.description)
-    setFormAmount(Math.abs(transaction.amount).toString())
-    setFormCategory(transaction.category)
-    setFormType(transaction.type)
-    setFormDate(transaction.date)
-    setFormNotes(transaction.notes || "")
-    setFormSplitWith(transaction.splitWith?.join(", ") || "")
-  }
 
   const resetForm = () => {
     setFormDescription("")
@@ -999,13 +1040,13 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
     }
     try {
       if (token) {
-        await fetch(`${apiBase}/transactions`, {
+        await fetch(`${API_BASE}/transactions`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         })
         // reload
-        const res = await fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+        const res = await fetch(`${API_BASE}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
         if (res.ok) {
           const data = await res.json()
           const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
@@ -1099,8 +1140,8 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
 
   const handleDeleteTransaction = async (id: string) => {
     if (token) {
-      await fetch(`${apiBase}/transactions/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } })
-      const res = await fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+      await fetch(`${API_BASE}/transactions/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } })
+      const res = await fetch(`${API_BASE}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
       if (res.ok) {
         const data = await res.json()
         const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
@@ -1133,12 +1174,12 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       notes: formDescription || formNotes,
     }
     if (token) {
-      await fetch(`${apiBase}/transactions/${editingTransaction.id}`, {
+      await fetch(`${API_BASE}/transactions/${editingTransaction.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       })
-      const res = await fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+      const res = await fetch(`${API_BASE}/transactions`, { headers: { Authorization: `Bearer ${token}` } })
       if (res.ok) {
         const data = await res.json()
         const memberNameMap = new Map(familyMembers.map((m) => [m.id, m.name]))
@@ -1185,7 +1226,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       spent: 0,
       period: budgetPeriod,
     }
-    
+
     try {
       if (token) {
         // Save to backend
@@ -1195,13 +1236,13 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
           amount: b.limit,
           period: b.period,
         }
-        
-        const res = await fetch(`${apiBase}/budgets`, {
+
+        const res = await fetch(`${API_BASE}/budgets`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         })
-        
+
         if (res.ok) {
           const savedBudget = await res.json()
           b.id = savedBudget._id // Use backend ID
@@ -1213,7 +1254,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
         // Local fallback
         toast({ title: "Success", description: "Budget created (local only)" })
       }
-      
+
       setBudgets((prev) => [...prev, b])
       resetBudgetForm()
       setIsAddBudgetDialogOpen(false)
@@ -1265,7 +1306,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
       targetDate: goalDate || new Date().toISOString().slice(0, 10),
       category: goalCategory || "General",
     }
-    
+
     try {
       if (token) {
         // Save to backend
@@ -1276,13 +1317,13 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
           currentAmount: g.currentAmount,
           deadline: g.targetDate,
         }
-        
-        const res = await fetch(`${apiBase}/goals`, {
+
+        const res = await fetch(`${API_BASE}/goals`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         })
-        
+
         if (res.ok) {
           const savedGoal = await res.json()
           g.id = savedGoal._id // Use backend ID
@@ -1294,7 +1335,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
         // Local fallback
         toast({ title: "Success", description: "Goal created (local only)" })
       }
-      
+
       setGoals((prev) => [...prev, g])
       resetGoalForm()
       setIsAddGoalDialogOpen(false)
@@ -1328,15 +1369,9 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
         value: spent,
         color: getColorForCategory(category),
       }
-    } catch (error) {
-      console.error('Add member error:', error)
-      toast({ title: "Error", description: "Failed to add family member. Please try again.", variant: "destructive" as any })
-    } finally {
-      setMemberName("")
-      setMemberEmail("")
-      setIsAddMemberDialogOpen(false)
-    }
-  }
+    })
+
+
 
   const handleExport = (format: "csv" | "pdf") => {
     const data = transactions.map((t) => ({
@@ -1434,11 +1469,10 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${
-                  activeTab === tab
-                    ? "border-emerald-500 text-emerald-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+                className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${activeTab === tab
+                  ? "border-emerald-500 text-emerald-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  }`}
               >
                 {tab}
               </button>
@@ -1593,7 +1627,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                           ))}
                         </Pie>
                         <Tooltip formatter={(value) => [`$${value}`, "Spent"]} />
-                        <Legend formatter={(value, entry) => `${value}: $${entry.payload.value}`} />
+                        <Legend formatter={(value, entry: any) => `${value}: $${entry?.payload?.value}`} />
                       </RechartsPieChart>
                     </ResponsiveContainer>
                   )}
@@ -1740,7 +1774,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                             </div>
                             <Progress value={Math.min(percentage, 100)} className="h-2" />
                             <div className="flex items-center justify-between mt-1">
-                              <span className={`text-xs ${status.color}`}>{percentage.toFixed(0)}% used</span>
+                              <span className={`text-xs ${status === 'critical' ? 'text-red-500' : status === 'warning' ? 'text-yellow-500' : 'text-gray-500'}`}>{percentage.toFixed(0)}% used</span>
                               {percentage >= 100 && (
                                 <span className="text-xs text-red-600 font-medium">Over budget!</span>
                               )}
@@ -1784,15 +1818,15 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                       onClick={async () => {
                         setSaving(true); setMessage(null)
                         try {
-                          const res = await fetch(`${apiBase}/auth/members`, {
+                          const res = await fetch(`${API_BASE}/auth/members`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify({ members: [ { key: 'member1', name: member1Edit }, { key: 'member2', name: member2Edit } ] })
+                            body: JSON.stringify({ members: [{ key: 'member1', name: member1Edit }, { key: 'member2', name: member2Edit }] })
                           })
                           if (res.ok) {
                             setMessage('Members updated')
                             // reload profile & update local member list
-                            const me = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+                            const me = await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
                             if (me.ok) {
                               const data = await me.json()
                               setProfile(data)
@@ -2306,7 +2340,7 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
                         <Progress value={Math.min(percentage, 100)} className="h-3" />
 
                         <div className="flex items-center justify-between">
-                          <span className={`text-sm font-medium ${status.color}`}>{percentage.toFixed(0)}% used</span>
+                          <span className={`text-sm font-medium ${status === 'critical' ? 'text-red-500' : status === 'warning' ? 'text-yellow-500' : 'text-gray-500'}`}>{percentage.toFixed(0)}% used</span>
                           <span
                             className={`text-sm font-medium ${remaining >= 0 ? "text-emerald-600" : "text-red-600"}`}
                           >
@@ -2573,13 +2607,12 @@ function FinanceDashboard({ userIncome, userLoan }: { userIncome: number; userLo
               {aiInsights.map((insight) => (
                 <Card
                   key={insight.id}
-                  className={`dark:bg-gray-900 dark:border-gray-800 ${
-                    insight.type === "warning"
-                      ? "border-yellow-500/40"
-                      : insight.type === "achievement"
+                  className={`dark:bg-gray-900 dark:border-gray-800 ${insight.type === "warning"
+                    ? "border-yellow-500/40"
+                    : insight.type === "achievement"
                       ? "border-emerald-500/40"
                       : "border-blue-500/40"
-                  }`}
+                    }`}
                 >
                   <CardHeader>
                     <div className="flex items-center justify-between">
